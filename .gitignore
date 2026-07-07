@@ -1,0 +1,16 @@
+# Local-only course control files - never commit these
+CLAUDE.md
+curriculum.md
+progress-tracker.md
+
+# Maven / Java build output
+target/
+*.class
+
+# IDEs
+.idea/
+*.iml
+.vscode/
+
+# Local Claude Code settings
+.claude/
