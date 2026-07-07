@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- This is the POM: Maven's single control file for the whole project.
+     Every build decision (Java version, libraries, plugins) is pinned HERE,
+     in one committed file, so the build behaves the same on every machine. -->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+    <!-- The version of the POM file format itself, not of our project.
+         For Maven 3 this is always 4.0.0 - there is no choice to make. -->
+    <modelVersion>4.0.0</modelVersion>
+
+    <!-- The three "coordinates" that uniquely name this project, the same way
+         a street address uniquely names a house. -->
+    <!-- groupId: who owns the project - reversed domain style, shared by the whole course series. -->
+    <groupId>com.corejava</groupId>
+    <!-- artifactId: this specific project's name - it becomes the built .jar file's name. -->
+    <artifactId>jvm-explorer</artifactId>
+    <!-- version: which edition of the project this is. SNAPSHOT means "still in development,
+         not a frozen release" - the right label for a learning project that changes every lesson. -->
+    <version>1.0-SNAPSHOT</version>
+    <!-- packaging: what the build produces. jar = a plain runnable Java archive,
+         the simplest possible output - no frameworks, no servers. -->
+    <packaging>jar</packaging>
+
+    <properties>
+        <!-- Tell the compiler to accept ONLY Java 21 language features and produce
+             class files that run on Java 21. This is the version pin for the whole
+             19-course series - one number, one place, never guessed. -->
+        <maven.compiler.release>21</maven.compiler.release>
+        <!-- Force UTF-8 for reading source files so builds do not silently differ
+             between machines whose operating systems use different default encodings. -->
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <!-- The single pinned JUnit 5 version for the whole course, named once here
+             and referenced below, so upgrading later means editing exactly one line.
+             (JUnit 6 exists, but this course pins the JUnit 5 line as agreed.) -->
+        <junit.version>5.13.4</junit.version>
+    </properties>
+
+    <dependencies>
+        <!-- Our one and only library: JUnit 5, the testing framework.
+             "junit-jupiter" is the convenience artifact that pulls in everything
+             needed to write AND run JUnit 5 tests in one declaration. -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <!-- Reuse the pinned version from <properties> instead of repeating the number. -->
+            <version>${junit.version}</version>
+            <!-- scope "test" means: available while compiling and running tests,
+                 but NOT packaged into the final jar - production code never sees it. -->
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!-- Maven itself is just a coordinator; plugins do the real work.
+                 We pin each plugin's version too, because an unpinned plugin means
+                 Maven picks a version for you - and different Maven installs pick
+                 differently, breaking "same build everywhere". -->
+
+            <!-- The compiler plugin: the piece of Maven that actually calls the
+                 Java compiler on our source files. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <!-- Pinned so every machine compiles with identical behavior. -->
+                <version>3.13.0</version>
+            </plugin>
+
+            <!-- The surefire plugin: the piece of Maven that finds and runs our
+                 JUnit tests during `mvn test` and reports pass/fail. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <!-- Pinned; older surefire versions cannot run JUnit 5 at all,
+                     which is a classic silent failure ("Tests run: 0"). -->
+                <version>3.5.2</version>
+            </plugin>
+
+            <!-- The exec plugin: lets us run our main class straight from Maven
+                 with `mvn exec:java`, without hand-building classpaths. -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <!-- Pinned for the same reproducibility reason as everything else. -->
+                <version>3.5.0</version>
+                <configuration>
+                    <!-- The default class to run, so plain `mvn exec:java` works.
+                         Later lessons can still override this with -Dexec.mainClass=... -->
+                    <mainClass>com.corejava.jvm.JvmExplorer</mainClass>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>
