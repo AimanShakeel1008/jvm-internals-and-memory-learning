@@ -94,18 +94,74 @@ aside.toc a:hover {
   border-left-color: #b8541a;
   text-decoration: none;
 }
-/* prev / next links at the foot of the TOC */
+/* Course navigation at the foot of the TOC: stacked prev / course-map / next
+   cards. Each prev+next card NAMES its destination, so the learner always sees
+   where they came from and where they are going — not a bare "Next →". */
 .toc-nav {
-  margin-top: 0.9rem;
-  padding-top: 0.8rem;
+  margin-top: 1rem;
+  padding-top: 0.9rem;
   border-top: 1px solid #e0d6c7;
   display: flex;
-  justify-content: space-between;
-  gap: 0.5rem;
-  font-size: 0.82rem;
+  flex-direction: column;
+  gap: 0.55rem;
 }
-.toc-nav a { font-weight: 600; color: #0e7490; }
-.toc-nav a.disabled { color: #b8ad9d; pointer-events: none; }
+
+/* prev / next destination card (primary copper accent) */
+.navcard {
+  display: block;
+  border: 1px solid #e6dccd;
+  border-left: 4px solid #b8541a;
+  border-radius: 10px;
+  background: #fdfbf6;
+  padding: 0.5rem 0.7rem 0.6rem;
+}
+.navcard:hover { text-decoration: none; border-color: #b8541a; }
+.navkicker {
+  display: block;
+  font-size: 0.64rem;
+  font-weight: 800;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: #9a4416;
+  margin-bottom: 0.1rem;
+}
+.navtitle {
+  display: block;
+  font-size: 0.95rem;
+  font-weight: 700;
+  line-height: 1.25;
+  color: #9a4416;
+}
+.navnote {
+  display: block;
+  font-size: 0.66rem;
+  font-style: italic;
+  color: #8a7f70;
+  margin-top: 0.15rem;
+}
+/* not-yet-written / start-of-course state: visible for orientation, not clickable */
+.navcard.disabled {
+  border-left-color: #c9bfae;
+  background: #f6f2ea;
+  pointer-events: none;
+}
+.navcard.disabled .navkicker,
+.navcard.disabled .navtitle { color: #9c917f; }
+
+/* course-map pill (secondary teal, so it reads as a different kind of jump) */
+.navmap {
+  display: block;
+  text-align: center;
+  border: 2px solid #0e7490;
+  border-radius: 999px;
+  padding: 0.45rem 0.7rem;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: #0e7490;
+}
+.navmap:hover { background: #0e7490; color: #fff; text-decoration: none; }
 
 main { min-width: 0; } /* min-width:0 lets code blocks scroll instead of stretching the grid */
 
@@ -615,8 +671,15 @@ section:nth-of-type(n+4) { animation-delay: 0.18s; }
   aside.toc a { color: #c9bfae; }
   aside.toc a:hover { background: #2c2013; border-left-color: #ef9a4d; }
   .toc-nav { border-top-color: #3a332a; }
-  .toc-nav a { color: #4cc4e0; }
-  .toc-nav a.disabled { color: #6b6153; }
+  .navcard { background: #262019; border-color: #3a332a; border-left-color: #ef9a4d; }
+  .navcard:hover { border-color: #ef9a4d; }
+  .navkicker, .navtitle { color: #f0a35a; }
+  .navnote { color: #a89c88; }
+  .navcard.disabled { background: #201c16; border-left-color: #5a5040; }
+  .navcard.disabled .navkicker,
+  .navcard.disabled .navtitle { color: #8a8070; }
+  .navmap { border-color: #4cc4e0; color: #4cc4e0; }
+  .navmap:hover { background: #4cc4e0; color: #17140f; }
 
   .banner {
     color: #fff5ec;
