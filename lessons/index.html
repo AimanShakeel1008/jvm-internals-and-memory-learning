@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Course Hub · JVM Internals &amp; Memory</title>
+  <link rel="stylesheet" href="assets/lesson.css">
+</head>
+<body>
+<div class="page">
+
+  <aside class="toc">
+    <p class="toc-title">Course map</p>
+    <ol>
+      <li><a href="#roadmap">Roadmap</a></li>
+      <li><a href="#p1">Phase 1 · Foundations</a></li>
+      <li><a href="#p2">Phase 2 · Memory &amp; GC</a></li>
+      <li><a href="#p3">Phase 3 · Observing</a></li>
+    </ol>
+    <nav class="toc-nav">
+      <a class="disabled">← Prev</a>
+      <a href="#p1">Start ↓</a>
+      <a href="phase-1-foundations/chapter-00-setup/lesson-00-full-setup.html">Next →</a>
+    </nav>
+  </aside>
+
+  <main>
+    <header class="banner">
+      <p class="kicker">Core Java In-Depth · Course 01 of 19</p>
+      <h1>JVM Internals &amp; Memory Management</h1>
+      <p class="subtitle">What actually happens when Java runs: source to bytecode, class loading, the heap, garbage collection, and the JIT — the base layer every later course stands on.</p>
+      <p class="meta"><strong>Project:</strong> <code>jvm-explorer</code> — a program that provokes and observes the JVM itself. &nbsp;·&nbsp; <strong>8 lessons</strong> (00–07), plain Java 21, no frameworks.</p>
+    </header>
+
+    <!-- ===================== ROADMAP (you-are-here) ===================== -->
+    <section id="roadmap">
+      <h2><span class="sec-num">★</span> You are here</h2>
+      <figure class="roadmap fig">
+        <svg viewBox="0 0 720 170" role="img" aria-label="Course roadmap of three phases left to right: Foundations (current), Memory and Garbage Collection, and Observing a live JVM. A marker sits on the Foundations phase, which is in progress.">
+          <defs>
+            <marker id="rah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path class="fig-arrow-h" d="M0,0 L10,5 L0,10 z"/>
+            </marker>
+          </defs>
+          <!-- connecting track -->
+          <path class="fig-arrow" d="M120,110 L280,110" marker-end="url(#rah)"/>
+          <path class="fig-arrow" d="M400,110 L560,110" marker-end="url(#rah)"/>
+
+          <!-- Phase 1: current (amber = where the learner is working) -->
+          <rect class="fig-code" x="24" y="80" width="96" height="60" rx="12"/>
+          <text class="fig-label" x="72" y="106" text-anchor="middle">Phase 1</text>
+          <text class="fig-small" x="72" y="124" text-anchor="middle">Foundations</text>
+          <!-- you-are-here pin -->
+          <circle class="fig-vs" cx="72" cy="52" r="16"/>
+          <text class="fig-vs-t" x="72" y="57" text-anchor="middle">▾</text>
+          <text class="fig-small" x="72" y="30" text-anchor="middle">you are here</text>
+
+          <!-- Phase 2 -->
+          <rect class="fig-infra" x="304" y="80" width="96" height="60" rx="12"/>
+          <text class="fig-label" x="352" y="106" text-anchor="middle">Phase 2</text>
+          <text class="fig-small" x="352" y="124" text-anchor="middle">Memory &amp; GC</text>
+
+          <!-- Phase 3 -->
+          <rect class="fig-infra" x="584" y="80" width="112" height="60" rx="12"/>
+          <text class="fig-label" x="640" y="106" text-anchor="middle">Phase 3</text>
+          <text class="fig-small" x="640" y="124" text-anchor="middle">Observing</text>
+        </svg>
+        <figcaption><strong>Three stages.</strong> Amber = the phase you are working through now; teal = phases still ahead. You finish one phase before the next unlocks in your own understanding — nothing here gates your clicks.</figcaption>
+      </figure>
+    </section>
+
+    <!-- ===================== PHASE 1 ===================== -->
+    <section id="p1">
+      <h2><span class="sec-num">1</span> Phase 1 · Foundations</h2>
+      <p class="hub-phase">Setup · how Java runs · class loading</p>
+      <div class="hub-grid">
+        <a class="hub-card" href="phase-1-foundations/chapter-00-setup/lesson-00-full-setup.html">
+          <span class="status-badge done">Done</span>
+          <h3>Lesson 00 — Full Setup</h3>
+          <p>Pin every version, write it into committed files, and make the machine prove its identity. Builds <code>jvm-explorer</code> and its first three tests.</p>
+        </a>
+        <div class="hub-card">
+          <span class="status-badge next">Next</span>
+          <h3>Lesson 01 — How Java actually runs</h3>
+          <p>Source → bytecode → JVM. Disassemble a tiny method with <code>javap -c</code>; interpreter vs JIT at a glance.</p>
+        </div>
+        <div class="hub-card">
+          <span class="status-badge planned">Planned</span>
+          <h3>Lesson 02 — Class loading</h3>
+          <p>The three class loaders, parent delegation, and exactly when a class initializes.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== PHASE 2 ===================== -->
+    <section id="p2">
+      <h2><span class="sec-num">2</span> Phase 2 · Memory &amp; Garbage Collection</h2>
+      <p class="hub-phase">Runtime memory areas · object lifecycle · GC algorithms · the JIT</p>
+      <div class="hub-grid">
+        <div class="hub-card">
+          <span class="status-badge planned">Planned</span>
+          <h3>Lesson 03 — Runtime memory areas</h3>
+          <p>Stack vs heap, Metaspace, and provoking <code>StackOverflowError</code> and <code>OutOfMemoryError</code> on purpose.</p>
+        </div>
+        <div class="hub-card">
+          <span class="status-badge planned">Planned</span>
+          <h3>Lesson 04 — Object lifecycle &amp; GC basics</h3>
+          <p>Reachability, the generational hypothesis, and watching objects age and promote.</p>
+        </div>
+        <div class="hub-card">
+          <span class="status-badge planned">Planned</span>
+          <h3>Lesson 05 — GC algorithms &amp; reading GC logs</h3>
+          <p>Serial, Parallel, G1, ZGC honestly compared; jvm-explorer parses its own GC log.</p>
+        </div>
+        <div class="hub-card">
+          <span class="status-badge planned">Planned</span>
+          <h3>Lesson 06 — The JIT compiler</h3>
+          <p>Hotspots, tiered compilation, inlining, escape analysis — and why the tenth run is fast.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== PHASE 3 ===================== -->
+    <section id="p3">
+      <h2><span class="sec-num">3</span> Phase 3 · Observing a live JVM</h2>
+      <p class="hub-phase">Tools · heap dumps · the full journey of one object</p>
+      <div class="hub-grid">
+        <div class="hub-card">
+          <span class="status-badge planned">Planned</span>
+          <h3>Lesson 07 — Seeing inside a live JVM</h3>
+          <p><code>jcmd</code>, <code>jmap</code>, <code>jstack</code>, VisualVM; take a heap dump and find a planted leak. Course recap.</p>
+        </div>
+      </div>
+    </section>
+
+    <p class="position">Course 01 of 19 · Core Java In-Depth — update this hub's badges as each lesson is completed.</p>
+  </main>
+</div>
+</body>
+</html>

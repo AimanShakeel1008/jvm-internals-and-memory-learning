@@ -1,0 +1,748 @@
+/* ============================================================================
+   lesson.css — ONE shared stylesheet for every lesson in
+   Core Java Course 01: JVM Internals & Memory Management.
+
+   RULES THIS FILE OBEYS (see CLAUDE.md):
+   - Works fully offline (file://). No @import, no web fonts, no remote images.
+   - Literal colour values only. NO CSS custom properties (var(--x)) — some
+     preview renderers drop them.
+   - Every colour has a light value AND a @media (prefers-color-scheme: dark)
+     override, grouped at the bottom of this file.
+   - Every gradient background is preceded by a solid-colour fallback line.
+   - All motion is wrapped by @media (prefers-reduced-motion: reduce).
+
+   PALETTE — "Molten engine" (fits a JVM/HotSpot course):
+     primary   copper/amber  #b8541a   the "hot" engine, actions, header
+     secondary teal          #0e7490   structure, notes, subsections
+     tertiary  indigo        #4f46e5   gradients, arrows, depth
+     reserved  magenta       #a21caf   FOR-LEARNING-ONLY callouts ONLY
+     page      parchment     #f7f3ec   warm neutral background
+     ink       #26211c       warm near-black body text
+   SVG colour LANGUAGE (kept identical everywhere):
+     amber  = the learner's own code / project (jvm-explorer)
+     teal   = framework / tool / infrastructure (JVM, JDK, Maven)
+     grey   = external / generic (the OS, the internet, other machines)
+   ============================================================================ */
+
+/* ---- 0. RESET-ISH BASE ---------------------------------------------------- */
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: #f7f3ec;
+  color: #26211c;
+  font-family: "Segoe UI", Roboto, "Helvetica Neue", Arial, system-ui, sans-serif;
+  font-size: 18px;
+  line-height: 1.7;
+}
+
+/* Readable, code-friendly monospace stack used by every terminal/code block. */
+code, pre, .fig-mono, .sim-console {
+  font-family: "Cascadia Code", "Consolas", "SFMono-Regular", "Menlo",
+               "DejaVu Sans Mono", monospace;
+}
+
+a { color: #9a4416; text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* ---- 1. PAGE LAYOUT: sticky TOC sidebar + content column ------------------ */
+.page {
+  display: grid;
+  grid-template-columns: 16rem minmax(0, 47rem);
+  gap: 2.5rem;
+  justify-content: center;
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: 1.5rem 1.25rem 4rem;
+  align-items: start;
+}
+
+/* Table-of-contents sidebar: sticks while the content scrolls. */
+aside.toc {
+  position: sticky;
+  top: 1rem;
+  align-self: start;
+  font-size: 0.9rem;
+  border: 1px solid #e0d6c7;
+  border-radius: 14px;
+  background: #fbf8f2;
+  padding: 1rem 1rem 1.1rem;
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
+}
+aside.toc .toc-title {
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #8a7f70;
+  margin: 0 0 0.6rem;
+  font-weight: 700;
+}
+aside.toc ol { list-style: none; margin: 0; padding: 0; counter-reset: toc; }
+aside.toc li { margin: 0.15rem 0; }
+aside.toc a {
+  display: block;
+  padding: 0.28rem 0.5rem;
+  border-radius: 8px;
+  color: #4a4238;
+  border-left: 3px solid transparent;
+}
+aside.toc a:hover {
+  background: #f2e4d4;
+  border-left-color: #b8541a;
+  text-decoration: none;
+}
+/* prev / next links at the foot of the TOC */
+.toc-nav {
+  margin-top: 0.9rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid #e0d6c7;
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+}
+.toc-nav a { font-weight: 600; color: #0e7490; }
+.toc-nav a.disabled { color: #b8ad9d; pointer-events: none; }
+
+main { min-width: 0; } /* min-width:0 lets code blocks scroll instead of stretching the grid */
+
+/* ---- 2. HEADER BANNER ----------------------------------------------------- */
+.banner {
+  border-radius: 18px;
+  padding: 2rem 1.9rem 1.8rem;
+  color: #fff5ec;
+  margin-bottom: 2rem;
+  /* solid fallback FIRST, then the gradient (primary -> tertiary) */
+  background: #b8541a;
+  background: linear-gradient(135deg, #b8541a 0%, #9a3d2e 45%, #4f46e5 130%);
+  box-shadow: 0 10px 30px rgba(80, 40, 10, 0.18);
+}
+.banner .kicker {
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-size: 0.74rem;
+  font-weight: 700;
+  opacity: 0.9;
+  margin: 0 0 0.5rem;
+}
+.banner h1 {
+  font-size: 2.15rem;
+  line-height: 1.15;
+  margin: 0 0 0.6rem;
+  font-weight: 800;
+}
+.banner .subtitle { font-size: 1.08rem; margin: 0; opacity: 0.96; }
+.banner .meta {
+  margin: 1rem 0 0;
+  font-size: 0.82rem;
+  opacity: 0.9;
+  border-top: 1px solid rgba(255, 245, 236, 0.28);
+  padding-top: 0.7rem;
+}
+.banner .meta strong { font-weight: 700; }
+
+/* ---- 3. SECTIONS, HEADINGS ------------------------------------------------ */
+section { margin: 0 0 2.4rem; scroll-margin-top: 1rem; }
+
+h2 {
+  font-size: 1.5rem;
+  line-height: 1.25;
+  margin: 0 0 1rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 3px solid #eab890;          /* accent underline */
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+/* filled rounded number badge before each section title */
+.sec-num {
+  flex: 0 0 auto;
+  display: inline-grid;
+  place-items: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  border-radius: 9px;
+  background: #b8541a;
+  color: #fff;
+  font-size: 0.95rem;
+  font-weight: 800;
+}
+h3 {
+  font-size: 1.18rem;
+  color: #0e7490;                             /* subsections in the secondary hue */
+  margin: 1.6rem 0 0.6rem;
+}
+h4 { font-size: 1.02rem; margin: 1.2rem 0 0.4rem; color: #4a4238; }
+
+p { margin: 0.7rem 0; }
+ul, ol { padding-left: 1.4rem; }
+li { margin: 0.3rem 0; }
+strong { font-weight: 700; }
+
+/* ---- 4. CODE: terminal-dark blocks with macOS traffic lights -------------- */
+/* Inline code: soft tinted background. */
+:not(pre) > code {
+  background: #f0e2d2;
+  color: #8a3d12;
+  padding: 0.08em 0.4em;
+  border-radius: 5px;
+  font-size: 0.86em;
+}
+
+/* Block code + ASCII diagrams share the dark terminal look. */
+pre {
+  position: relative;
+  background: #1e1e26;
+  color: #e6e6ea;
+  border-radius: 12px;
+  padding: 2.3rem 1.1rem 1.15rem;             /* top room for the dots bar */
+  margin: 1.1rem 0;
+  overflow-x: auto;
+  font-size: 0.82rem;
+  line-height: 1.55;
+  box-shadow: 0 6px 18px rgba(20, 12, 4, 0.16);
+  -webkit-overflow-scrolling: touch;
+}
+pre code { background: none; color: inherit; padding: 0; font-size: inherit; }
+
+/* macOS traffic-light dots: one ::before + two box-shadows = three dots. */
+pre.terminal::before,
+pre.code::before {
+  content: "";
+  position: absolute;
+  top: 0.8rem;
+  left: 1.1rem;
+  width: 0.72rem;
+  height: 0.72rem;
+  border-radius: 50%;
+  background: #ff5f56;                          /* red */
+  box-shadow: 1.15rem 0 0 #ffbd2e,              /* amber */
+              2.3rem 0 0 #27c93f;               /* green */
+}
+/* ASCII diagram: same dark card, but NO dots (it is a picture, not a shell). */
+pre.ascii { padding-top: 1.15rem; }
+pre.ascii::before { content: none; }
+
+/* Manual syntax-highlight spans (Part 4.3). Dark bg in both themes => no dark override. */
+.cmt { color: #7f8c9b; font-style: italic; }   /* comments */
+.kw  { color: #ff9e64; }                        /* keywords: public, static, final */
+.ty  { color: #7dcfff; }                        /* types: String, long, Runtime */
+.str { color: #9ece6a; }                        /* string literals */
+.num { color: #ff9e64; }                        /* number literals */
+.anno{ color: #e0af68; }                        /* @annotations */
+.fn  { color: #bb9af7; }                        /* method names */
+.out { color: #9ece6a; font-weight: 600; }      /* key/expected output lines */
+
+/* ---- 5. CALLOUT CARDS ----------------------------------------------------- */
+/* Base card: coloured left border + a CSS-generated uppercase label. */
+.callout {
+  border-radius: 10px;
+  padding: 0.9rem 1.1rem 0.95rem 1.15rem;
+  margin: 1.2rem 0;
+  border-left: 6px solid #b8541a;
+  background: #fbf3ea;
+}
+.callout::before {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin-bottom: 0.35rem;
+}
+.callout p:first-of-type { margin-top: 0; }
+.callout p:last-child { margin-bottom: 0; }
+
+/* try-it / run-and-compare (primary amber) */
+.tryit { border-left-color: #b8541a; background: #fbefe2; }
+.tryit::before { content: "Try it — run & compare"; color: #9a4416; }
+
+/* note (secondary teal) */
+.note { border-left-color: #0e7490; background: #e7f3f6; }
+.note::before { content: "Note"; color: #0b5a71; }
+
+/* warning (warm red) */
+.warning { border-left-color: #c2410c; background: #fdece0; }
+.warning::before { content: "Watch out"; color: #9a2c06; }
+
+/* for-learning-only (RESERVED magenta hue — used nowhere else) */
+.forlearning { border-left-color: #a21caf; background: #f8e6f6; }
+.forlearning::before { content: "For learning only"; color: #86138f; }
+
+/* in the real world (green) */
+.realworld { border-left-color: #15803d; background: #e6f3ea; }
+.realworld::before { content: "In the real world"; color: #10662f; }
+
+/* ---- 6. TABLES: scrollable wrap, tinted header, zebra striping ------------- */
+.table-wrap {
+  overflow-x: auto;
+  border: 1px solid #e0d6c7;
+  border-radius: 10px;
+  margin: 1.2rem 0;
+  -webkit-overflow-scrolling: touch;
+}
+table { border-collapse: collapse; width: 100%; font-size: 0.92rem; }
+thead th {
+  background: #efe3d3;
+  text-align: left;
+  padding: 0.6rem 0.8rem;
+  font-weight: 700;
+  border-bottom: 2px solid #e0d6c7;
+}
+tbody td { padding: 0.55rem 0.8rem; border-bottom: 1px solid #ece2d3; vertical-align: top; }
+tbody tr:nth-child(even) { background: #f7efe3; }
+tbody tr:last-child td { border-bottom: none; }
+
+/* ---- 7. DETAILS CARDS: hidden answers vs. micro-checks -------------------- */
+/* Challenge / hidden-answer card (amber). */
+details.answer {
+  border: 1px solid #e6c9ad;
+  border-left: 6px solid #b8541a;
+  border-radius: 10px;
+  background: #fdf6ee;
+  padding: 0.2rem 1.1rem;
+  margin: 1.2rem 0;
+}
+details.answer > summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: #9a4416;
+  padding: 0.7rem 0;
+  list-style: none;
+}
+details.answer > summary::before { content: "▶ "; font-size: 0.8em; }
+details.answer[open] > summary::before { content: "▼ "; }
+
+/* Active-recall micro-check card (teal, visually distinct from .answer). */
+details.check {
+  border: 1px dashed #7fb9c6;
+  border-radius: 10px;
+  background: #eef6f8;
+  padding: 0.2rem 1.1rem;
+  margin: 1rem 0;
+}
+details.check > summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: #0b5a71;
+  padding: 0.6rem 0;
+  list-style: none;
+}
+details.check > summary::before { content: "✔ Check yourself — "; font-weight: 800; }
+details.check[open] > summary::before { content: "✔ Check yourself"; }
+details.check .answer-body { padding-bottom: 0.7rem; }
+
+/* ---- 8. "NEXT UP" FOOTER + position line ---------------------------------- */
+.nextup {
+  border-radius: 16px;
+  padding: 1.4rem 1.5rem;
+  color: #fff5ec;
+  margin: 2.5rem 0 1rem;
+  /* solid fallback FIRST, then gradient */
+  background: #0e7490;
+  background: linear-gradient(120deg, #0e7490 0%, #4f46e5 100%);
+}
+.nextup .kicker {
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 0.72rem;
+  font-weight: 700;
+  opacity: 0.9;
+  margin: 0 0 0.3rem;
+}
+.nextup h2 { border: none; color: #fff; font-size: 1.25rem; margin: 0 0 0.4rem; padding: 0; }
+.nextup a { color: #ffe9d5; font-weight: 700; text-decoration: underline; }
+.position {
+  text-align: center;
+  font-size: 0.82rem;
+  color: #8a7f70;
+  font-style: italic;
+  margin-top: 1.4rem;
+}
+
+/* ---- 9. FIGURES / INLINE SVG DIAGRAMS (Part 2: .fig-*) --------------------- */
+figure.fig {
+  margin: 1.4rem 0;
+  padding: 1rem 1rem 0.4rem;
+  border: 1px solid #e4dccd;
+  border-radius: 14px;
+  background: #fdfbf6;
+}
+figure.fig svg { width: 100%; height: auto; display: block; }
+figure.fig figcaption {
+  font-size: 0.82rem;
+  color: #6b6153;
+  margin-top: 0.6rem;
+  line-height: 1.5;
+  border-top: 1px solid #ece2d3;
+  padding-top: 0.5rem;
+}
+
+/* Box variants — the SVG colour language. Applied to <rect> and text groups. */
+.fig-box     { fill: #f4ede2; stroke: #cdbfa9; stroke-width: 1.5; }   /* generic surface */
+.fig-code    { fill: #f6ddc6; stroke: #c9722f; stroke-width: 2; }     /* learner's own code (amber) */
+.fig-infra   { fill: #d6ebf1; stroke: #0e7490; stroke-width: 2; }     /* framework/tool/infra (teal) */
+.fig-generic { fill: #e7e2d8; stroke: #a99e8b; stroke-width: 1.5; }   /* external/generic (grey) */
+.fig-accent2 { fill: #e2e0fb; stroke: #4f46e5; stroke-width: 2; }     /* tertiary indigo, for depth */
+
+/* Text roles inside SVG. */
+.fig-heading { fill: #26211c; font: 700 15px "Segoe UI", sans-serif; }
+.fig-label   { fill: #3f3830; font: 600 13px "Segoe UI", sans-serif; }
+.fig-small   { fill: #6b6153; font: 400 11px "Segoe UI", sans-serif; }
+.fig-mono    { fill: #3f3830; font: 12px "Consolas", monospace; }
+.fig-on-dark { fill: #f4ede2; }                                       /* label on a filled dark box */
+
+/* Arrows + arrowheads (marker fill matched by class on the <path>). */
+.fig-arrow   { stroke: #6b6153; stroke-width: 2; fill: none; }
+.fig-arrow-h { fill: #6b6153; }                                       /* arrowhead marker */
+.fig-arrow-accent   { stroke: #b8541a; stroke-width: 2.5; fill: none; }
+.fig-arrow-accent-h { fill: #b8541a; }
+
+/* before/after "VS" badge */
+.fig-vs {
+  fill: #a21caf;
+  stroke: #fff;
+  stroke-width: 2;
+}
+.fig-vs-t { fill: #fff; font: 800 14px "Segoe UI", sans-serif; }
+
+/* ---- 10. INTERACTIVE SIMULATIONS (Part 3: .sim-*) ------------------------- */
+.sim {
+  border: 1px solid #d9cdbb;
+  border-radius: 14px;
+  background: #fbf6ee;
+  padding: 2.1rem 1.2rem 1.2rem;
+  margin: 1.5rem 0;
+  position: relative;
+}
+/* auto "Interactive simulation" label in the top-left corner */
+.sim::before {
+  content: "⚙ Interactive simulation";
+  position: absolute;
+  top: 0;
+  left: 0;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #fff;
+  background: #b8541a;
+  padding: 0.28rem 0.8rem;
+  border-radius: 14px 0 12px 0;
+}
+.sim-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 0.9rem;
+}
+.sim-controls .sim-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.78rem;
+  color: #6b6153;
+}
+.sim-btn {
+  font: 600 0.85rem "Segoe UI", sans-serif;
+  padding: 0.4rem 0.85rem;
+  border-radius: 8px;
+  border: 1.5px solid #cbb79f;
+  background: #fff;
+  color: #4a4238;
+  cursor: pointer;
+}
+.sim-btn:hover { border-color: #b8541a; }
+.sim-btn.active {                                /* a toggle that is currently ON */
+  background: #f6ddc6;
+  border-color: #b8541a;
+  color: #8a3d12;
+}
+.sim-btn.action {                                /* the primary "run" button */
+  background: #b8541a;
+  border-color: #b8541a;
+  color: #fff;
+}
+.sim-btn:focus-visible { outline: 3px solid #4f46e5; outline-offset: 2px; }
+
+/* terminal-style console output */
+.sim-console {
+  background: #1e1e26;
+  color: #e6e6ea;
+  border-radius: 10px;
+  padding: 0.9rem 1rem;
+  font-size: 0.82rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  min-height: 3rem;
+  overflow-x: auto;
+}
+.sim-console .ok   { color: #9ece6a; }           /* success / chosen */
+.sim-console .skip { color: #7f8c9b; }           /* skipped / ignored */
+.sim-console .bad  { color: #ff7a6b; }           /* failure / rejected */
+.sim-console .hi   { color: #ffbd2e; font-weight: 700; }  /* highlight */
+.sim-tree { font-size: 0.82rem; line-height: 1.5; }
+.sim-note {
+  font-size: 0.8rem;
+  color: #6b6153;
+  margin-top: 0.7rem;
+  border-top: 1px dashed #d9cdbb;
+  padding-top: 0.6rem;
+}
+.sim-note strong { color: #9a2c06; }
+
+/* ---- 11. HOVER-TO-DEFINE GLOSSARY TERMS (Part 4.2) ------------------------ */
+.term {
+  border-bottom: 2px dotted #0e7490;
+  cursor: help;
+  position: relative;
+}
+.term:focus-visible { outline: 2px solid #4f46e5; outline-offset: 2px; }
+.term::after {
+  content: attr(data-def);
+  position: absolute;
+  left: 0;
+  bottom: 130%;
+  z-index: 20;
+  width: max-content;
+  max-width: 20rem;
+  background: #26211c;
+  color: #f4ede2;
+  font-size: 0.78rem;
+  font-weight: 400;
+  line-height: 1.45;
+  padding: 0.5rem 0.7rem;
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(20, 12, 4, 0.3);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+.term:hover::after,
+.term:focus::after,
+.term:focus-visible::after { opacity: 1; visibility: visible; }
+
+/* ---- 12. COURSE HUB + ROADMAP (Part 4.1) ---------------------------------- */
+.hub-intro { margin-bottom: 1.5rem; }
+.hub-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  gap: 1rem;
+  margin: 1.4rem 0;
+}
+.hub-card {
+  border: 1px solid #e0d6c7;
+  border-radius: 12px;
+  background: #fdfbf6;
+  padding: 1rem 1.1rem;
+  display: block;
+  color: inherit;
+}
+.hub-card:hover { border-color: #b8541a; text-decoration: none; }
+.hub-card h3 { margin: 0.2rem 0 0.3rem; color: #26211c; font-size: 1.02rem; }
+.hub-card p { margin: 0; font-size: 0.85rem; color: #6b6153; }
+.hub-phase {
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #0e7490;
+  font-weight: 700;
+}
+/* status badges: done / next / planned */
+.status-badge {
+  display: inline-block;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0.15rem 0.5rem;
+  border-radius: 20px;
+  vertical-align: middle;
+}
+.status-badge.done    { background: #d7efdf; color: #10662f; }
+.status-badge.next    { background: #f6ddc6; color: #8a3d12; }
+.status-badge.planned { background: #e7e2d8; color: #6b6153; }
+figure.roadmap { margin: 1.5rem 0; }
+figure.roadmap svg { width: 100%; height: auto; }
+
+/* ---- 13. ENTRANCE / DECORATIVE ANIMATIONS (kill-switched below) ----------- */
+section, .banner, figure.fig, .callout, .sim {
+  animation: rise 0.5s ease both;
+}
+.banner { animation-delay: 0.02s; }
+section:nth-of-type(1) { animation-delay: 0.06s; }
+section:nth-of-type(2) { animation-delay: 0.10s; }
+section:nth-of-type(3) { animation-delay: 0.14s; }
+section:nth-of-type(n+4) { animation-delay: 0.18s; }
+@keyframes rise {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+/* slow gradient drift on the banner */
+.banner { background-size: 180% 180%; animation: rise 0.5s ease both, drift 18s ease-in-out infinite; }
+@keyframes drift {
+  0%, 100% { background-position: 0% 50%; }
+  50%      { background-position: 100% 50%; }
+}
+/* hover lift on interactive cards */
+.hub-card, .sim-btn { transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease; }
+.hub-card:hover { transform: translateY(-3px); box-shadow: 0 8px 22px rgba(80, 40, 10, 0.12); }
+
+/* ---- 14. RESPONSIVE: collapse TOC above content on narrow screens --------- */
+@media (max-width: 62rem) {
+  .page { grid-template-columns: minmax(0, 1fr); gap: 1.2rem; }
+  aside.toc {
+    position: static;
+    max-height: none;
+    order: -1;              /* TOC sits ABOVE the content, not beside it */
+  }
+  .banner h1 { font-size: 1.7rem; }
+}
+
+/* ============================================================================
+   15. DARK MODE — every colour above gets an override here.
+   ============================================================================ */
+@media (prefers-color-scheme: dark) {
+  body { background: #17140f; color: #ece5da; }
+  a { color: #ef9a4d; }
+
+  aside.toc { background: #211d17; border-color: #3a332a; }
+  aside.toc .toc-title { color: #a89c88; }
+  aside.toc a { color: #c9bfae; }
+  aside.toc a:hover { background: #2c2013; border-left-color: #ef9a4d; }
+  .toc-nav { border-top-color: #3a332a; }
+  .toc-nav a { color: #4cc4e0; }
+  .toc-nav a.disabled { color: #6b6153; }
+
+  .banner {
+    color: #fff5ec;
+    background: #7a3811;
+    background: linear-gradient(135deg, #7a3811 0%, #5c2a20 45%, #3730a3 130%);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+  }
+
+  h2 { border-bottom-color: #6b4a2a; }
+  .sec-num { background: #ef9a4d; color: #17140f; }
+  h3 { color: #4cc4e0; }
+  h4 { color: #c9bfae; }
+
+  :not(pre) > code { background: #33291d; color: #f0a35a; }
+  /* pre stays dark in both themes — no override needed */
+
+  .callout { background: #221d16; }
+  .tryit { border-left-color: #ef9a4d; background: #2a2016; }
+  .tryit::before { color: #f0a35a; }
+  .note { border-left-color: #4cc4e0; background: #16262b; }
+  .note::before { color: #6fd0e6; }
+  .warning { border-left-color: #f0763a; background: #2c1a10; }
+  .warning::before { color: #f0a35a; }
+  .forlearning { border-left-color: #e57bd6; background: #2a1628; }
+  .forlearning::before { color: #f09fe4; }
+  .realworld { border-left-color: #5cc98a; background: #142519; }
+  .realworld::before { color: #7bd6a1; }
+
+  .table-wrap { border-color: #3a332a; }
+  thead th { background: #2a251d; border-bottom-color: #3a332a; }
+  tbody td { border-bottom-color: #2a251d; }
+  tbody tr:nth-child(even) { background: #201c16; }
+
+  details.answer { background: #221d16; border-color: #4a3925; border-left-color: #ef9a4d; }
+  details.answer > summary { color: #f0a35a; }
+  details.check { background: #16262b; border-color: #3d6b76; }
+  details.check > summary { color: #6fd0e6; }
+
+  .nextup {
+    background: #0b5a71;
+    background: linear-gradient(120deg, #0b5a71 0%, #3730a3 100%);
+  }
+  .position { color: #a89c88; }
+
+  figure.fig { background: #201c16; border-color: #3a332a; }
+  figure.fig figcaption { color: #a89c88; border-top-color: #2a251d; }
+  /* SVG colour language — dark variants */
+  .fig-box     { fill: #2a251d; stroke: #5a5040; }
+  .fig-code    { fill: #4a2f16; stroke: #ef9a4d; }
+  .fig-infra   { fill: #133038; stroke: #4cc4e0; }
+  .fig-generic { fill: #2c2820; stroke: #7a715f; }
+  .fig-accent2 { fill: #1e1c46; stroke: #a5b4fc; }
+  .fig-heading { fill: #ece5da; }
+  .fig-label   { fill: #d4cbba; }
+  .fig-small   { fill: #a89c88; }
+  .fig-mono    { fill: #d4cbba; }
+  .fig-on-dark { fill: #f4ede2; }
+  .fig-arrow   { stroke: #a89c88; }
+  .fig-arrow-h { fill: #a89c88; }
+  .fig-arrow-accent   { stroke: #ef9a4d; }
+  .fig-arrow-accent-h { fill: #ef9a4d; }
+  .fig-vs { fill: #e57bd6; stroke: #17140f; }
+  .fig-vs-t { fill: #17140f; }
+
+  .sim { background: #201c16; border-color: #3a332a; }
+  .sim::before { background: #ef9a4d; color: #17140f; }
+  .sim-controls .sim-group { color: #a89c88; }
+  .sim-btn { background: #2a251d; border-color: #5a5040; color: #d4cbba; }
+  .sim-btn:hover { border-color: #ef9a4d; }
+  .sim-btn.active { background: #4a2f16; border-color: #ef9a4d; color: #f0a35a; }
+  .sim-btn.action { background: #ef9a4d; border-color: #ef9a4d; color: #17140f; }
+  .sim-note { border-top-color: #3a332a; color: #a89c88; }
+  .sim-note strong { color: #f0763a; }
+
+  .term { border-bottom-color: #4cc4e0; }
+  .term::after { background: #000; color: #f4ede2; }
+
+  .hub-card { background: #201c16; border-color: #3a332a; }
+  .hub-card:hover { border-color: #ef9a4d; }
+  .hub-card h3 { color: #ece5da; }
+  .hub-card p { color: #a89c88; }
+  .hub-phase { color: #4cc4e0; }
+  .status-badge.done    { background: #143d24; color: #7bd6a1; }
+  .status-badge.next    { background: #4a2f16; color: #f0a35a; }
+  .status-badge.planned { background: #2c2820; color: #a89c88; }
+}
+
+/* ============================================================================
+   16. REDUCED MOTION — single kill-switch for ALL animation & transition.
+   ============================================================================ */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* ============================================================================
+   17. PRINT — clean PDF notes: hide chrome, flatten banners, wrap code,
+   avoid page-breaks inside figures/callouts/code.
+   ============================================================================ */
+@media print {
+  body { background: #fff; color: #000; font-size: 12pt; }
+  .page { display: block; max-width: 100%; padding: 0; }
+  aside.toc, .toc-nav, .nextup { display: none; }        /* hide navigation chrome */
+  .banner {
+    background: none !important;
+    color: #000;
+    border: 2px solid #000;
+    box-shadow: none;
+  }
+  .banner .kicker, .banner .subtitle, .banner .meta { opacity: 1; color: #000; }
+  .sec-num { background: #000 !important; color: #fff !important; }
+  pre, .sim-console {
+    white-space: pre-wrap;                                 /* wrap long code lines */
+    word-break: break-word;
+    background: #f2f2f2 !important;
+    color: #000 !important;
+    box-shadow: none;
+    border: 1px solid #999;
+  }
+  pre.terminal::before, pre.code::before, .sim::before { display: none; }
+  .cmt,.kw,.ty,.str,.num,.anno,.fn,.out { color: #000 !important; }
+  .sim-controls { display: none; }                         /* buttons are useless on paper */
+  /* keep these blocks whole across page breaks */
+  figure, .callout, pre, details, .sim { break-inside: avoid; page-break-inside: avoid; }
+  a { color: #000; text-decoration: underline; }
+  a[href^="http"]::after { content: " (" attr(href) ")"; font-size: 0.8em; }
+}

@@ -1,0 +1,616 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lesson 00 — Full Setup · JVM Internals &amp; Memory</title>
+  <link rel="stylesheet" href="../../assets/lesson.css">
+</head>
+<body>
+<div class="page">
+
+  <!-- ============================ TOC SIDEBAR ============================ -->
+  <aside class="toc">
+    <p class="toc-title">On this page</p>
+    <ol>
+      <li><a href="#s1">1 · The pain</a></li>
+      <li><a href="#s2">2 · Real-world analogy</a></li>
+      <li><a href="#s3">3 · The concept</a></li>
+      <li><a href="#s4">4 · The wrong way</a></li>
+      <li><a href="#s5">5 · The right way</a></li>
+      <li><a href="#s6">6 · Applied to jvm-explorer</a></li>
+      <li><a href="#s7">7 · In the wild</a></li>
+      <li><a href="#s8">8 · Gotchas</a></li>
+      <li><a href="#s9">9 · Tradeoffs</a></li>
+      <li><a href="#s10">10 · Key takeaways</a></li>
+      <li><a href="#s11">11 · Challenge</a></li>
+      <li><a href="#s12">12 · Almanac update</a></li>
+      <li><a href="#s13">13 · What is next</a></li>
+    </ol>
+    <nav class="toc-nav">
+      <a class="disabled">← Prev</a>
+      <a href="../../index.html">Hub ↑</a>
+      <a class="disabled">Next →</a>
+    </nav>
+  </aside>
+
+  <!-- ============================ MAIN CONTENT ============================ -->
+  <main>
+
+    <header class="banner">
+      <p class="kicker">Core Java · Course 01 · JVM Internals &amp; Memory</p>
+      <h1>Lesson 00 — Full Setup</h1>
+      <p class="subtitle">Decide every version once, write it into committed files, and make the machine prove its identity before anything else runs.</p>
+      <p class="meta">
+        <strong>Position:</strong> Lesson 00 of 07 (the setup lesson) &nbsp;·&nbsp;
+        <strong>Prerequisites:</strong> none &nbsp;·&nbsp;
+        <strong>Project files:</strong> <code>pom.xml</code>, <code>JvmExplorer.java</code>, <code>JvmExplorerTest.java</code>
+      </p>
+    </header>
+
+    <!-- ===================== SECTION 1 — THE PAIN ===================== -->
+    <section id="s1">
+      <h2><span class="sec-num">1</span> The pain</h2>
+
+      <p>Picture two people working on the same small Java program. On Priya's laptop it compiles cleanly, all tests pass, everything is green. She sends the exact same code to Sam. On Sam's laptop the compiler rejects a line she wrote, one test fails with a bizarre message, and the build tool downloads a different version of a library without telling anyone. Nothing about the <em>code</em> changed. What changed is the <em>machines</em>: Sam has an older Java, a different build-tool version, and no record of which library versions the project expects. This failure is so common it has a sarcastic industry name: <strong>&ldquo;works on my machine.&rdquo;</strong> It burns hours, and the hours are pure waste — nobody is fixing a real bug, they are fixing a disagreement between two computers.</p>
+
+      <p>Now shrink that story to one person: you, three weeks from now. You come back to this course after a break. In the meantime you installed some other tool that quietly put a <em>different</em> Java at the front of your system's search path. Suddenly lesson code that worked before behaves differently — and this course is about <em>observing the JVM's exact behavior</em>, so &ldquo;slightly different Java&rdquo; can mean &ldquo;every observation is now slightly wrong.&rdquo; A garbage-collection log line looks different. A default changed. You cannot tell whether you are learning a fact about Java or a fact about your accidental upgrade.</p>
+
+      <p>The cure is boring and absolute: <strong>decide every version once, write the decision into files that live with the code, and make the machine prove its identity before anything else runs.</strong> That is all this lesson is. It looks like installation chores; it is actually the first real JVM lesson, because the very first thing we build is a program that interrogates the JVM about itself — version, vendor, memory ceiling — and a test that fails loudly if the machine drifts from the agreement.</p>
+    </section>
+
+    <!-- ===================== SECTION 2 — ANALOGY ===================== -->
+    <section id="s2">
+      <h2><span class="sec-num">2</span> Real-world analogy</h2>
+
+      <p>Setting up a professional kitchen before cooking a 7-course meal.</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Kitchen</th><th>This lesson</th></tr></thead>
+          <tbody>
+            <tr><td>The stove, oven, and knives — the equipment that does the actual cooking</td><td>The <strong>JDK</strong> — the toolkit that compiles and runs Java</td></tr>
+            <tr><td>The head chef's rule &ldquo;we use gas stove model X, nothing else&rdquo;</td><td><strong>Pinning Java 21</strong> — one agreed version, written down</td></tr>
+            <tr><td>The kitchen porter who fetches ingredients so cooks never leave their station</td><td><strong>Maven</strong> — fetches libraries and runs the build for you</td></tr>
+            <tr><td>The recipe card taped above the counter listing exact brands and amounts</td><td><strong><code>pom.xml</code></strong> — the one file naming every ingredient and version</td></tr>
+            <tr><td>Tasting each dish before it leaves the kitchen</td><td><strong>JUnit tests</strong> — automatic checks that run on demand</td></tr>
+            <tr><td>The kitchen diary: who changed which recipe, when, and why</td><td><strong>Git</strong> — the history of every change to the project</td></tr>
+            <tr><td>The off-site recipe safe, in case the kitchen burns down</td><td><strong>GitHub</strong> — the copy of that history on another computer</td></tr>
+            <tr><td>The &ldquo;do not put in the diary&rdquo; list (scratch notes, reminders)</td><td><strong><code>.gitignore</code></strong> — files Git is told to pretend not to see</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>One mapping deserves emphasis: the recipe card (<code>pom.xml</code>) is taped <em>inside the kitchen</em>, not kept in someone's head. Any cook who walks in can reproduce the dish exactly. That is the whole philosophy of this lesson: <strong>the machine's configuration lives in committed files, never in memory or luck.</strong></p>
+    </section>
+
+    <!-- ===================== SECTION 3 — CONCEPT ===================== -->
+    <section id="s3">
+      <h2><span class="sec-num">3</span> The concept explained</h2>
+
+      <p>We will meet each tool in dependency order: first the thing that runs Java at all, then the thing that builds projects, then testing, then history-keeping. Every term gets introduced fully the first time. Take it slowly; everything later in the course stands on these.</p>
+
+      <h3>3.1 What actually runs your Java code</h3>
+
+      <p>Here is a puzzle worth sitting with. A program compiled on Windows normally <em>cannot</em> run on Linux, because a compiled program is a list of instructions for a specific kind of machine, and Windows-machine instructions and Linux-machine conventions differ. Yet compiled Java runs on both, unchanged. How?</p>
+
+      <p>The trick: Java code is not compiled for any real machine. It is compiled for an <em>imaginary, idealized</em> machine — a machine that does not exist as hardware. Then, on every real computer, a program is installed whose whole job is to <em>pretend to be</em> that imaginary machine: it reads the imaginary machine's instructions and carries them out using the real machine underneath. Your compiled program only ever speaks to the pretender, so it never notices which real computer it is on. A program that acts out the role of a machine like this is called a <span class="term" tabindex="0" data-def="A program that pretends to be an idealized machine, running compiled instructions on top of the real hardware.">virtual machine</span>, and the one that acts out Java's imaginary machine is the <strong>Java Virtual Machine — the <span class="term" tabindex="0" data-def="Java Virtual Machine: the program that runs compiled Java, owns its memory, and manages garbage collection and JIT compilation.">JVM</span></strong>. The JVM is the main character of this entire course: it is where your objects live, where memory is managed, where garbage is collected, where code gets fast. (How your source code becomes instructions for that imaginary machine is exactly Lesson 01.)</p>
+
+      <p>Three package names get confused constantly, so let's pin them down:</p>
+      <ul>
+        <li>The JVM alone can run <em>already-compiled</em> code but cannot compile anything. The JVM bundled together with the standard libraries (the huge collection of ready-made classes like <code>String</code> and <code>ArrayList</code>) forms the minimum needed to <em>run</em> Java programs. This run-only bundle is called the <strong>JRE — Java Runtime Environment</strong>. (Modern Java no longer ships it as a separate download, but the name survives in error messages and old articles, so you must recognize it.)</li>
+        <li>Everything in the JRE <em>plus</em> the developer tools — most importantly <code>javac</code> (the compiler, which turns your source code into instructions the JVM understands — Lesson 01 dissects this) and diagnostic tools we will use in Lesson 07 — is called the <strong><span class="term" tabindex="0" data-def="Java Development Kit: the JRE plus developer tools (javac, javap, jcmd…). This is what you install as a developer.">JDK</span> — Java Development Kit</strong>. As a developer you always install a JDK.</li>
+      </ul>
+
+      <!-- SVG DIAGRAM 1: JDK ⊃ JRE ⊃ JVM containment (upgraded from ASCII) -->
+      <figure class="fig">
+        <svg viewBox="0 0 640 300" role="img" aria-label="Three nested boxes. The outer box is the JDK, holding developer tools. Inside it the JRE holds the standard libraries. Inside that the innermost box is the JVM, the engine that executes code and owns memory.">
+          <!-- outer: JDK -->
+          <rect class="fig-infra" x="10" y="10" width="620" height="280" rx="14"/>
+          <text class="fig-heading" x="28" y="38">JDK — Java Development Kit  (build + run)</text>
+          <text class="fig-small" x="28" y="58">developer tools: javac, javap, jcmd, jmap, jstack …</text>
+          <!-- middle: JRE -->
+          <rect class="fig-accent2" x="40" y="76" width="560" height="200" rx="12"/>
+          <text class="fig-heading" x="58" y="102">JRE — Java Runtime Environment  (run only)</text>
+          <text class="fig-small" x="58" y="122">standard libraries: String, List, Files …</text>
+          <!-- inner: JVM -->
+          <rect class="fig-code" x="72" y="140" width="496" height="118" rx="10"/>
+          <text class="fig-heading" x="90" y="172">JVM — the engine  (HotSpot)</text>
+          <text class="fig-label" x="90" y="198">executes code · owns memory · runs GC &amp; JIT</text>
+          <text class="fig-small" x="90" y="224">This is the main character of the whole course.</text>
+        </svg>
+        <figcaption><strong>Containment, not three separate things.</strong> Teal outer = the developer toolkit you install (JDK); indigo = the run-only bundle (JRE); amber = the engine itself (JVM). Rule of thumb: <strong>JDK = build + run, JRE = run only, JVM = the engine inside both.</strong></figcaption>
+      </figure>
+
+      <p>One more wrinkle: &ldquo;the JDK&rdquo; is not one product from one company. The source code is open (the OpenJDK project), and several organizations compile that shared source into installable packages — Eclipse Adoptium (whose builds are named <strong>Temurin</strong>), Oracle, Amazon, Microsoft, and others. Same engine, different wrapper, like the same novel issued by different publishers. This course uses <strong>Eclipse Temurin</strong> because it is free for all use and the de-facto community default. The engine inside all of these is named <strong>HotSpot</strong> — remember that name; when this course says &ldquo;the JVM does X,&rdquo; it means HotSpot specifically, and our first program will print that name so you can see it is really there.</p>
+
+      <details class="check">
+        <summary>Why does compiled Java run unchanged on Windows and Linux?</summary>
+        <div class="answer-body">Because <code>javac</code> does not compile for any real CPU; it compiles for an imaginary machine. Each real computer runs a JVM whose job is to <em>impersonate</em> that imaginary machine on top of the real hardware. Your program only ever talks to the JVM, so it never notices the real OS or CPU underneath.</div>
+      </details>
+
+      <h3>3.2 Why version 21, and why &ldquo;pinned&rdquo;</h3>
+
+      <p>Java releases a new version every six months, but most versions get updates for only six months — fine for experiments, bad for a 19-course journey. Every couple of years, one release is designated for <em>years</em> of continued fixes and security patches. A release with that long support promise is called an <strong>LTS — Long-Term Support</strong> release. Java 21 is an LTS release, is what a large share of the industry runs, and has every feature this series needs. So the whole series pins <strong>Java 21</strong>.</p>
+
+      <p><strong>Pinning</strong> means: the version is written into committed files (<code>pom.xml</code> says <code>21</code>; this lesson says Temurin 21; the almanac records it), the build <em>checks</em> it, and nobody changes it casually. The payoff is that when code behaves oddly, &ldquo;wrong version somewhere&rdquo; is eliminated as a suspect in seconds — you run one test and know. In a course about observing precise JVM behavior, that certainty is oxygen: GC defaults, log formats, and JIT behavior all shift between versions, and we need to know which Java produced what we observe.</p>
+
+      <h3>3.3 Maven — the build tool</h3>
+
+      <p>Suppose there were no build tool. To build even our small project you would personally: download the JUnit library from the internet — plus the <em>other</em> libraries JUnit itself needs, finding each by hand; invoke <code>javac</code> with a correctly-spelled list of every source file and every library location; keep compiled test code out of the shipped program; run the tests; package everything into a distributable archive. Every step retyped, in the right order, forever, and your teammate must replicate your exact downloads to get the same result. People really worked this way; it was misery.</p>
+
+      <p>A program that does all of that from a single written description is called a <strong>build tool</strong>, and the standard one in the Java world (alongside a popular alternative called Gradle) is <strong><span class="term" tabindex="0" data-def="The standard Java build tool. Reads one file (pom.xml) describing the project and derives how to compile, test, and package it.">Maven</span></strong>. You write <em>what the project is</em> — its name, its Java version, which libraries it uses — into one file, and Maven derives <em>how to build it</em>. That file is <code>pom.xml</code> (<strong>POM</strong> = Project Object Model — the project described as structured data), and it always sits at the project root. You have one committed at <code>jvm-explorer/pom.xml</code>, where every line carries a comment explaining why it exists.</p>
+
+      <p>Concepts inside the POM you will meet constantly:</p>
+      <ul>
+        <li>A <strong><span class="term" tabindex="0" data-def="A library your project relies on. You name it in pom.xml; Maven fetches it and everything it needs.">dependency</span></strong> is a library your code depends on — someone else's compiled code your project uses instead of rewriting. You declare it by name; Maven fetches it, <em>and everything it in turn depends on</em>, automatically. Our only dependency is JUnit.</li>
+        <li>Every library (and your own project) is identified by three <strong>coordinates</strong>, like a postal address: <code>groupId</code> (who made it — reversed-domain style, e.g. <code>org.junit.jupiter</code>), <code>artifactId</code> (which product, e.g. <code>junit-jupiter</code>), <code>version</code> (which edition, e.g. <code>5.13.4</code>). Three parts because names collide — dozens of libraries are called &ldquo;core&rdquo;; coordinates make each unambiguous.</li>
+        <li>Where does Maven fetch from? A public warehouse site holding millions of published libraries, called <strong>Maven Central</strong>. Downloads are cached in a folder on your machine (<code>~/.m2/repository</code>, i.e. <code>C:\Users\&lt;you&gt;\.m2\repository</code> on Windows) so each library downloads once, not per-build. First builds are slow and network-hungry; later builds are quiet. Expect that.</li>
+        <li>Maven itself is a thin coordinator; the real work is done by <strong>plugins</strong> — bolt-on components, one per job (a compiler plugin that calls <code>javac</code>, a test-running plugin, a run-my-main-class plugin). Plugins are versioned like everything else, and our POM pins each one, because an unpinned plugin version is chosen <em>for</em> you, differently on different machines — the exact disease we are curing.</li>
+        <li>Our own version, <code>1.0-SNAPSHOT</code>, uses the Maven convention where the suffix <strong>SNAPSHOT</strong> marks a version as &ldquo;still moving, not a frozen release.&rdquo; Right for a project that changes every lesson.</li>
+      </ul>
+
+      <p>Maven also ends the &ldquo;where do files go?&rdquo; debate by <em>convention</em>: main code lives in <code>src/main/java</code>, test code in <code>src/test/java</code>, and everything Maven generates goes into <code>target/</code> — a disposable folder you never edit and never commit (our <code>.gitignore</code> already excludes it; deleting it costs nothing, which is literally what <code>mvn clean</code> does).</p>
+
+      <pre class="ascii"><code>jvm-explorer/
+    pom.xml                                   <span class="cmt">&lt;- the recipe card (committed)</span>
+    src/main/java/com/corejava/jvm/           <span class="cmt">&lt;- real program code (committed)</span>
+    src/test/java/com/corejava/jvm/           <span class="cmt">&lt;- test code (committed)</span>
+    target/                                   <span class="cmt">&lt;- Maven's scratch output (NEVER committed)</span></code></pre>
+
+      <p>You drive Maven from the terminal, from the folder containing <code>pom.xml</code>. The commands this course uses constantly:</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Command</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr><td><code>mvn compile</code></td><td>Compile the main source code into <code>target/</code></td></tr>
+            <tr><td><code>mvn test</code></td><td>Compile everything, then run all tests and report pass/fail</td></tr>
+            <tr><td><code>mvn clean</code></td><td>Delete <code>target/</code> for a guaranteed-fresh next build</td></tr>
+            <tr><td><code>mvn exec:java</code></td><td>Run the project's main class (our POM tells it which one)</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>3.4 JUnit — tests that check themselves</h3>
+
+      <p>Without tests, &ldquo;does the project still work?&rdquo; means running the program and eyeballing the output — and as the project grows, you re-eyeball <em>everything after every change</em>, or (realistically) you stop checking and break things silently. A <strong>unit test</strong> is a small piece of code whose job is to check a piece of real code automatically: it calls the real code, states what <em>must</em> be true about the result, and a framework runs every such check and prints a verdict. The standard framework for this in Java is <strong><span class="term" tabindex="0" data-def="The standard Java testing framework. You write small methods that assert what must be true; it runs them all and reports pass/fail.">JUnit</span></strong> (we pin version 5.13.4, the current release of the JUnit 5 line). Inside a test, each &ldquo;this must be true&rdquo; statement is called an <strong><span class="term" tabindex="0" data-def="A single 'this must be true' statement inside a test, e.g. assertEquals(21, actual). Passes silently; fails the test loudly.">assertion</span></strong> — like <code>assertEquals(21, actualVersion)</code>, which passes silently if the value is 21 and fails the test loudly if not.</p>
+
+      <p>The habit this course builds: every capability jvm-explorer gains comes with a JUnit test asserting its expected behavior, so <strong><code>mvn test</code> is a one-command answer to &ldquo;did I break anything?&rdquo;</strong> — run it any time, especially before committing. Our first three tests (Section 6) guard the machine itself.</p>
+
+      <h3>3.5 Git and GitHub — the project's memory</h3>
+
+      <p>Without version control, project history is a folder of copies named <code>project-final-v2-REALLY-FINAL/</code>, and one bad edit with no surviving copy loses work forever. A <strong>version control system</strong> is a program that records snapshots of your files over time, so you can see what changed, when, and why, and return to any earlier state. The standard one is <strong>Git</strong>. Its vocabulary, each piece first in plain words:</p>
+      <ul>
+        <li>A <strong>repository</strong> (repo) is a folder whose history Git is tracking — the visible files plus a hidden <code>.git</code> subfolder holding every recorded snapshot. This course folder is a repo; that is why it contains <code>.git/</code>.</li>
+        <li>A <strong>commit</strong> is one saved snapshot with a message saying what changed. Made in two steps: <code>git add &lt;files&gt;</code> marks which changes to include (the shortcut <code>git add .</code> means &ldquo;everything changed under this folder&rdquo;), then <code>git commit -m "message"</code> seals them into history.</li>
+        <li>Git history alone still lives on one disk. <strong>GitHub</strong> is a website that stores copies of Git repositories online — backup plus sharing. The online copy linked to your local repo is called the <strong>remote</strong>; <code>git push</code> uploads your new commits to it. Your repo's remote is already connected (the initial commit is already pushed).</li>
+        <li>A <strong><code>.gitignore</code></strong> file lists names Git must pretend not to see, so <code>git add .</code> can never accidentally stage them. Two categories belong in ours: <em>rebuildable machine output</em> (<code>target/</code>, <code>*.class</code>, IDE settings folders) because committing generated files bloats history and causes fake conflicts; and <em>this course's three local-only control files</em> — <code>CLAUDE.md</code>, <code>curriculum.md</code>, <code>progress-tracker.md</code> — which are private course machinery, not course content. Critical ordering rule: <strong><code>.gitignore</code> must exist before the first <code>git add .</code></strong>, because ignoring a file <em>after</em> it is committed does not remove it from history. (Your repo did this correctly.)</li>
+      </ul>
+
+      <p>The rhythm for the rest of the course: <strong>one lesson → one commit → one push</strong>, message format <code>lesson: 01/lesson-XX - &lt;title&gt;</code>. Each lesson ends by printing the exact commands.</p>
+
+      <h3>3.6 The IDE</h3>
+
+      <p>You could write Java in Notepad, but you would be typing blind: no red underline under a typo, no auto-completion of names, no one-keystroke rename-everywhere, no clickable test results. A program that bundles editor, error-checking, navigation, and test running into one workbench is called an <strong>IDE — Integrated Development Environment</strong>. Recommended here: <strong>IntelliJ IDEA Community Edition</strong> — free, and the strongest Java experience (VS Code with the &ldquo;Extension Pack for Java&rdquo; is a fine lighter alternative). One honest warning, because this course cares about truth-on-the-machine: IntelliJ ships its <em>own</em> JDK list and its <em>own</em> test runner, so the IDE can disagree with the pinned setup. The command line (<code>mvn test</code>) is this course's referee; the IDE is a comfortable place to read and write code.</p>
+
+      <h3>3.7 The installation checklist — and the trap it defends against</h3>
+
+      <p>Two terms first, because the next simulation lives on them. Programs on your machine find each other through the <strong><span class="term" tabindex="0" data-def="An ordered list of folders the OS searches when you type a bare command like `java`. First match wins.">PATH</span></strong> — an operating-system list of folders searched, <em>in order</em>, whenever you type a bare command name like <code>java</code>; installers offering to &ldquo;add to PATH&rdquo; are offering to put their folder on that list, and <em>which</em> Java wins when several are installed is decided purely by list order (our version test exists to catch exactly that). Separately, many Java tools read <strong><span class="term" tabindex="0" data-def="A named environment variable pointing at your JDK's install folder. Maven uses it to choose which Java to build with — independently of PATH.">JAVA_HOME</span></strong> — a conventionally-named variable you set to your JDK's install folder; Maven uses it to decide which Java to run <em>with</em>, so if it is unset or points at an old JDK, Maven misbehaves even though <code>java -version</code> looks right.</p>
+
+      <p><strong>This is the single most common day-one trap</strong>, and it is worth <em>feeling</em> before you read the fix. The simulation below is a model of the rule: pick which JDK sits first on your PATH, pick where JAVA_HOME points, then read what each command reports. Watch <code>java -version</code> (which follows PATH) and <code>mvn test</code> (which follows JAVA_HOME) <em>disagree</em> — that disagreement is the whole bug.</p>
+
+      <!-- ===================== REFERENCE SIMULATION (sim1-) ===================== -->
+      <div class="sim" aria-labelledby="sim1-title">
+        <p id="sim1-title" style="margin-top:0"><strong>Which Java wins?</strong> — model of PATH vs JAVA_HOME resolution</p>
+
+        <div class="sim-controls">
+          <div class="sim-group">
+            <span>First on PATH (decides <code>java</code>):</span>
+            <span>
+              <button type="button" class="sim-btn active" id="sim1-path21" data-path="21">JDK&nbsp;21 first</button>
+              <button type="button" class="sim-btn" id="sim1-path8" data-path="8">JDK&nbsp;8 first</button>
+            </span>
+          </div>
+          <div class="sim-group">
+            <span>JAVA_HOME points at (decides Maven):</span>
+            <span>
+              <button type="button" class="sim-btn active" id="sim1-home21" data-home="21">JDK&nbsp;21</button>
+              <button type="button" class="sim-btn" id="sim1-home17" data-home="17">JDK&nbsp;17</button>
+              <button type="button" class="sim-btn" id="sim1-homeun" data-home="unset">unset</button>
+            </span>
+          </div>
+        </div>
+
+        <div class="sim-console" id="sim1-out" aria-live="polite"></div>
+
+        <p class="sim-note"><strong>This is a model, not your machine.</strong> The real authority is running <code>java -version</code> and <code>mvn -version</code> in a <em>fresh</em> terminal, and then <code>mvn test</code> inside <code>jvm-explorer/</code>. If your machine disagrees with this model, your machine is right — that mismatch is the lesson.</p>
+      </div>
+
+      <script>
+      /* Self-contained vanilla JS, no libraries, no network. Powers sim1 only.
+         It is a MODEL of how PATH and JAVA_HOME independently choose a JVM. */
+      (function () {
+        "use strict";
+        var state = { path: "21", home: "21" };            // current selections
+        var out = document.getElementById("sim1-out");
+
+        function span(cls, txt) { return '<span class="' + cls + '">' + txt + '</span>'; }
+
+        function render() {
+          // `java` follows PATH; Maven follows JAVA_HOME, falling back to PATH if unset.
+          var terminalJava = state.path;                    // what `java -version` reports
+          var mavenJava = state.home === "unset" ? state.path : state.home; // what mvn uses
+          var lines = [];
+
+          lines.push(span("hi", "$ java -version") + "   (follows PATH)");
+          lines.push("  → openjdk version " + span("ok", '"' + terminalJava + '.0.x"'));
+          lines.push("");
+          lines.push(span("hi", "$ mvn -version") + "    (follows JAVA_HOME)");
+          if (state.home === "unset") {
+            lines.push("  → JAVA_HOME " + span("skip", "unset") + " — Maven falls back to PATH");
+          }
+          lines.push("  → Java version: " + span("ok", mavenJava));
+          lines.push("");
+          lines.push(span("hi", "$ mvn test") + "        (runsOnPinnedJavaVersion asserts 21)");
+
+          if (mavenJava === "21") {
+            lines.push("  → " + span("ok", "BUILD SUCCESS — Tests run: 3, Failures: 0"));
+          } else {
+            lines.push("  → " + span("bad", "BUILD FAILURE"));
+            lines.push("    " + span("bad", "Expected Java 21 ... but was: " + mavenJava));
+          }
+
+          // The teaching moment: highlight when the two commands disagree.
+          if (terminalJava !== mavenJava) {
+            lines.push("");
+            lines.push(span("hi", "⚠ java -version says " + terminalJava +
+                       " but Maven is on " + mavenJava + " — the classic trap."));
+          }
+          out.innerHTML = lines.join("\n");
+        }
+
+        function wire(id, key, val, groupSelector) {
+          document.getElementById(id).addEventListener("click", function () {
+            state[key] = val;
+            // clear "active" across the button's group, then mark this one
+            document.querySelectorAll(groupSelector).forEach(function (b) {
+              b.classList.remove("active");
+            });
+            this.classList.add("active");
+            render();
+          });
+        }
+        wire("sim1-path21", "path", "21", "#sim1-path21,#sim1-path8");
+        wire("sim1-path8",  "path", "8",  "#sim1-path21,#sim1-path8");
+        wire("sim1-home21", "home", "21", "#sim1-home21,#sim1-home17,#sim1-homeun");
+        wire("sim1-home17", "home", "17", "#sim1-home21,#sim1-home17,#sim1-homeun");
+        wire("sim1-homeun", "home", "unset", "#sim1-home21,#sim1-home17,#sim1-homeun");
+        render();                                            // initial paint
+      })();
+      </script>
+
+      <p>Now the checklist itself. Do these in order; each has a verification step, and troubleshooting for every step lives in <code>troubleshooting.md</code>.</p>
+      <ol>
+        <li><strong>JDK 21 (Temurin).</strong> From <a href="https://adoptium.net/">adoptium.net</a> download Temurin <strong>21 (LTS)</strong> for Windows x64 (the <code>.msi</code>). In the installer, enable both &ldquo;Add to PATH&rdquo; and &ldquo;Set JAVA_HOME&rdquo;. Verify in a <em>fresh</em> terminal: <code>java -version</code> must say 21.x and name Temurin; <code>javac -version</code> must say <code>javac 21.x</code> (proves the full JDK, not just a runtime).</li>
+        <li><strong>Maven.</strong> From <a href="https://maven.apache.org/download.cgi">maven.apache.org</a> download the <strong>binary zip</strong> of the current 3.9.x release. Unzip somewhere permanent (e.g. <code>C:\tools\apache-maven-3.9.x</code>), add its <code>bin</code> subfolder to PATH, open a fresh terminal, and verify: <code>mvn -version</code> must print the Maven version <em>and</em> <code>Java version: 21</code>.</li>
+        <li><strong>Git.</strong> From <a href="https://git-scm.com/">git-scm.com</a> install with default options. Verify: <code>git --version</code>. Introduce yourself once: <code>git config --global user.name "Your Name"</code> and <code>git config --global user.email "you@example.com"</code>.</li>
+        <li><strong>GitHub.</strong> Account at <a href="https://github.com/">github.com</a>; create the empty repository (no auto-generated README). <strong>Already done for this repo</strong> — remote connected, initial commit pushed.</li>
+        <li><strong>IDE.</strong> IntelliJ IDEA <strong>Community Edition</strong> from <a href="https://www.jetbrains.com/idea/download/">jetbrains.com/idea</a>. Open the <code>jvm-explorer</code> folder. In <em>File → Project Structure → SDK</em>, confirm the SDK is the Temurin 21 you installed.</li>
+      </ol>
+    </section>
+
+    <!-- ===================== SECTION 4 — WRONG WAY ===================== -->
+    <section id="s4">
+      <h2><span class="sec-num">4</span> The wrong way</h2>
+
+      <p><strong>WRONG APPROACH — no pinning, no ignore file, no environment check.</strong> No code compiles wrongly here; the wrongness is in the <em>files that are missing or vague</em>. Three real mistakes.</p>
+
+      <p><strong>Mistake 1: a POM that names no versions.</strong></p>
+
+      <pre class="code"><code><span class="cmt">&lt;!-- WRONG: compiles today, drifts tomorrow --&gt;</span>
+<span class="ty">&lt;project</span> <span class="anno">xmlns</span>=<span class="str">"http://maven.apache.org/POM/4.0.0"</span> …<span class="ty">&gt;</span>
+    <span class="ty">&lt;modelVersion&gt;</span>4.0.0<span class="ty">&lt;/modelVersion&gt;</span>          <span class="cmt">&lt;!-- POM format version: fine --&gt;</span>
+    <span class="ty">&lt;groupId&gt;</span>com.corejava<span class="ty">&lt;/groupId&gt;</span>             <span class="cmt">&lt;!-- coordinates: fine --&gt;</span>
+    <span class="ty">&lt;artifactId&gt;</span>jvm-explorer<span class="ty">&lt;/artifactId&gt;</span>       <span class="cmt">&lt;!-- coordinates: fine --&gt;</span>
+    <span class="ty">&lt;version&gt;</span>1.0-SNAPSHOT<span class="ty">&lt;/version&gt;</span>             <span class="cmt">&lt;!-- coordinates: fine --&gt;</span>
+    <span class="cmt">&lt;!-- WRONG: no &lt;maven.compiler.release&gt; - so which Java level compiles
+         this project is whatever each machine's Maven decides. Priya's says
+         21, Sam's says 17, and 21-only code builds for her, not him. --&gt;</span>
+    <span class="ty">&lt;dependencies&gt;</span>
+        <span class="ty">&lt;dependency&gt;</span>
+            <span class="ty">&lt;groupId&gt;</span>org.junit.jupiter<span class="ty">&lt;/groupId&gt;</span>
+            <span class="ty">&lt;artifactId&gt;</span>junit-jupiter<span class="ty">&lt;/artifactId&gt;</span>
+            <span class="ty">&lt;version&gt;</span>RELEASE<span class="ty">&lt;/version&gt;</span>          <span class="cmt">&lt;!-- WRONG: "whatever is newest
+                 the moment you build" - two builds of the SAME code can use
+                 DIFFERENT JUnit versions and disagree. --&gt;</span>
+        <span class="ty">&lt;/dependency&gt;</span>
+    <span class="ty">&lt;/dependencies&gt;</span>
+    <span class="cmt">&lt;!-- WRONG: no pinned plugin versions - each Maven install picks its own,
+         so the compiler and test runner themselves differ across machines. --&gt;</span>
+<span class="ty">&lt;/project&gt;</span></code></pre>
+
+      <p><strong>Mistake 2: committing before writing <code>.gitignore</code>.</strong> Run <code>git add .</code> first and <code>target/</code> (thousands of generated files) plus private course-control files enter history permanently; adding <code>.gitignore</code> afterwards does <em>not</em> pull them back out.</p>
+
+      <p><strong>Mistake 3: never verifying which Java runs.</strong> Install JDK 21, but an old JDK 8 sits earlier on the PATH. Every command &ldquo;works&rdquo; — and every observation this course makes is made on the wrong engine.</p>
+
+      <div class="callout warning">
+        <p><strong>Predicted symptoms of the unpinned setup</strong> (appearing over the following weeks):</p>
+        <ul>
+          <li>&ldquo;invalid target release&rdquo; / &ldquo;release version not supported&rdquo; on machine A only</li>
+          <li>a JUnit upgrade nobody asked for changes test behavior between two builds</li>
+          <li>git history bloated with <code>target/</code> noise; private files exposed on GitHub</li>
+          <li>and the quietest one: JVM behavior in later lessons that does not match the lesson text, because the engine underneath is not the engine we agreed on</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ===================== SECTION 5 — RIGHT WAY ===================== -->
+    <section id="s5">
+      <h2><span class="sec-num">5</span> The right way</h2>
+
+      <p><strong>CORRECT APPROACH:</strong> one POM that pins everything (saved at <code>jvm-explorer/pom.xml</code>, every line why-commented — it is Section 3.3 made real), a <code>.gitignore</code> written before the first commit (done in your repo), and a first program plus tests that make the machine <em>prove</em> its identity. The program (<code>JvmExplorer.java</code>, shown fully in Section 6) asks the running JVM for its version, its engine name, its vendor, its heap ceiling, and its CPU count. The tests (<code>JvmExplorerTest.java</code>) then <em>assert</em> the pinned agreement — most importantly <code>runsOnPinnedJavaVersion</code>, which fails the whole build with a fix-it message if the JVM executing the build is not Java 21.</p>
+
+      <p>What happens, step by step, when you run <code>mvn test</code> the first time:</p>
+
+      <!-- SVG DIAGRAM 2: the mvn test build pipeline (flow) -->
+      <figure class="fig">
+        <svg viewBox="0 0 720 200" role="img" aria-label="A left-to-right pipeline: pom.xml feeds Maven, which resolves dependencies from the local cache or Maven Central, compiles main and test code into target, runs the tests with Surefire, and prints BUILD SUCCESS or BUILD FAILURE.">
+          <defs>
+            <marker id="ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path class="fig-arrow-h" d="M0,0 L10,5 L0,10 z"/>
+            </marker>
+          </defs>
+          <!-- pom.xml (learner-owned = amber) -->
+          <rect class="fig-code" x="8" y="70" width="96" height="56" rx="9"/>
+          <text class="fig-label" x="56" y="94" text-anchor="middle">pom.xml</text>
+          <text class="fig-small" x="56" y="112" text-anchor="middle">the recipe</text>
+          <!-- Maven (infra = teal) -->
+          <rect class="fig-infra" x="140" y="70" width="96" height="56" rx="9"/>
+          <text class="fig-label" x="188" y="94" text-anchor="middle">Maven</text>
+          <text class="fig-small" x="188" y="112" text-anchor="middle">reads + drives</text>
+          <!-- deps -->
+          <rect class="fig-generic" x="272" y="16" width="120" height="46" rx="9"/>
+          <text class="fig-small" x="332" y="36" text-anchor="middle">.m2 cache /</text>
+          <text class="fig-small" x="332" y="52" text-anchor="middle">Maven Central</text>
+          <!-- compile -->
+          <rect class="fig-infra" x="272" y="70" width="120" height="56" rx="9"/>
+          <text class="fig-label" x="332" y="94" text-anchor="middle">compile</text>
+          <text class="fig-small" x="332" y="112" text-anchor="middle">→ target/classes</text>
+          <!-- surefire -->
+          <rect class="fig-infra" x="428" y="70" width="120" height="56" rx="9"/>
+          <text class="fig-label" x="488" y="94" text-anchor="middle">Surefire</text>
+          <text class="fig-small" x="488" y="112" text-anchor="middle">runs @Test</text>
+          <!-- verdict -->
+          <rect class="fig-code" x="584" y="70" width="128" height="56" rx="9"/>
+          <text class="fig-label" x="648" y="94" text-anchor="middle">verdict</text>
+          <text class="fig-small" x="648" y="112" text-anchor="middle">SUCCESS / FAILURE</text>
+          <!-- arrows -->
+          <path class="fig-arrow" d="M104,98 L138,98" marker-end="url(#ah)"/>
+          <path class="fig-arrow" d="M236,86 L270,58" marker-end="url(#ah)"/>
+          <path class="fig-arrow" d="M236,98 L270,98" marker-end="url(#ah)"/>
+          <path class="fig-arrow-accent" d="M392,98 L426,98" marker-end="url(#ah)"/>
+          <path class="fig-arrow-accent" d="M548,98 L582,98" marker-end="url(#ah)"/>
+        </svg>
+        <figcaption><strong>The <code>mvn test</code> pipeline, left to right.</strong> Amber = files you own (<code>pom.xml</code>, the pass/fail verdict you read); teal = Maven's own machinery; grey = the outside world (the download cache and Maven Central). The first run pauses at the grey box to download; later runs skip straight through.</figcaption>
+      </figure>
+
+      <ol>
+        <li>Maven starts (on the Java that JAVA_HOME names), reads <code>pom.xml</code>, and learns coordinates, the Java 21 pin, the JUnit 5.13.4 dependency, the three pinned plugins.</li>
+        <li>It checks the local cache at <code>C:\Users\&lt;you&gt;\.m2\repository</code> for each needed item; anything missing is downloaded from Maven Central. First run: a minute or more of <code>Downloading...</code> lines — normal, once.</li>
+        <li>The compiler plugin calls <code>javac</code> on <code>JvmExplorer.java</code> with release 21; the class file lands in <code>target/classes/</code>.</li>
+        <li>The compiler plugin compiles the test source (JUnit now on the class path) into <code>target/test-classes/</code>.</li>
+        <li>The Surefire plugin scans for test classes, finds <code>JvmExplorerTest</code>, and runs each <code>@Test</code> method on a fresh instance.</li>
+        <li><code>runsOnPinnedJavaVersion</code> asks the running JVM its major version and asserts 21; the two sanity tests assert a positive heap ceiling and ≥1 CPU core.</li>
+        <li>Surefire prints the tally; Maven prints <code>BUILD SUCCESS</code> — or <code>BUILD FAILURE</code> naming exactly which assertion broke and why.</li>
+      </ol>
+
+      <div class="callout note">
+        <p><strong>Predicted output of <code>mvn test</code></strong> (trimmed; first run also shows many <code>Downloading...</code> lines):</p>
+      </div>
+      <pre class="terminal"><code>[INFO] -------------------------------------------------------
+[INFO]  T E S T S
+[INFO] -------------------------------------------------------
+[INFO] Running com.corejava.jvm.JvmExplorerTest
+<span class="out">[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.0xx s</span>
+[INFO]
+[INFO] Results:
+[INFO]
+<span class="out">[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0</span>
+[INFO]
+[INFO] ------------------------------------------------------------------------
+<span class="out">[INFO] BUILD SUCCESS</span>
+[INFO] ------------------------------------------------------------------------</code></pre>
+
+      <div class="callout tryit">
+        <p>Run <code>mvn test</code> from inside <code>jvm-explorer/</code> and check the result against the prediction above. If they differ, <strong>the machine is right</strong> — <code>troubleshooting.md</code> covers the likely failures, and the mismatch itself is the lesson.</p>
+      </div>
+    </section>
+
+    <!-- ===================== SECTION 6 — APPLIED ===================== -->
+    <section id="s6">
+      <h2><span class="sec-num">6</span> Applied to jvm-explorer</h2>
+
+      <p><strong>Files this lesson adds</strong> (all saved to disk):</p>
+      <ul>
+        <li><code>jvm-explorer/pom.xml</code> — the pinned build recipe (walked through in 3.3 and 5).</li>
+        <li><code>jvm-explorer/src/main/java/com/corejava/jvm/JvmExplorer.java</code> — the entry point.</li>
+        <li><code>jvm-explorer/src/test/java/com/corejava/jvm/JvmExplorerTest.java</code> — the environment tests.</li>
+      </ul>
+
+      <p>The entry point, every line carrying its why:</p>
+
+      <pre class="code"><code><span class="cmt">// Every Java file declares which package it belongs to. A package is a named</span>
+<span class="cmt">// folder for classes; ours mirrors the Maven groupId plus the project purpose,</span>
+<span class="cmt">// and Maven REQUIRES the folder path on disk to match this line exactly.</span>
+<span class="kw">package</span> com.corejava.jvm;
+
+<span class="cmt">// The front door of jvm-explorer. Lesson by lesson this program grows modules</span>
+<span class="cmt">// that provoke the JVM (fill memory, trigger GC, overflow the stack). For</span>
+<span class="cmt">// Lesson 00 its only job is to prove the toolchain works end to end by asking</span>
+<span class="cmt">// the running JVM to describe itself.</span>
+<span class="cmt">// "final" because this class is a standalone entry point - nothing should ever</span>
+<span class="cmt">// extend it, and saying so makes that intent impossible to violate by accident.</span>
+<span class="kw">public final class</span> <span class="ty">JvmExplorer</span> {
+
+    <span class="cmt">// The method the JVM looks for, by this exact signature, when told to run this</span>
+    <span class="cmt">// class. No object is created first, which is why it must be static; it must be</span>
+    <span class="cmt">// public so the JVM (which lives outside our package) is allowed to call it.</span>
+    <span class="kw">public static void</span> <span class="fn">main</span>(<span class="ty">String</span>[] args) {
+
+        <span class="cmt">// A banner line so that in later lessons, when Maven's own output surrounds</span>
+        <span class="cmt">// ours, the learner can instantly spot where OUR program's output begins.</span>
+        <span class="ty">System</span>.out.<span class="fn">println</span>(<span class="str">"=== jvm-explorer: hello from inside the JVM ==="</span>);
+
+        <span class="cmt">// The JVM keeps a table of "system properties" - facts about itself and the</span>
+        <span class="cmt">// machine, stored as name/value text. "java.version" is the exact version of</span>
+        <span class="cmt">// the runtime executing RIGHT NOW - which can differ from what is installed</span>
+        <span class="cmt">// elsewhere, so we ask the JVM, not the OS.</span>
+        <span class="ty">System</span>.out.<span class="fn">println</span>(<span class="str">"Java version : "</span> + <span class="ty">System</span>.<span class="fn">getProperty</span>(<span class="str">"java.version"</span>));
+
+        <span class="cmt">// "java.vm.name" names the JVM implementation (expected: HotSpot). Printed</span>
+        <span class="cmt">// because this whole course is about HotSpot's internals.</span>
+        <span class="ty">System</span>.out.<span class="fn">println</span>(<span class="str">"JVM name     : "</span> + <span class="ty">System</span>.<span class="fn">getProperty</span>(<span class="str">"java.vm.name"</span>));
+
+        <span class="cmt">// "java.vm.vendor" names who built this JVM (Eclipse Adoptium, Oracle, ...).</span>
+        <span class="cmt">// Different vendors ship the same core HotSpot from shared source.</span>
+        <span class="ty">System</span>.out.<span class="fn">println</span>(<span class="str">"JVM vendor   : "</span> + <span class="ty">System</span>.<span class="fn">getProperty</span>(<span class="str">"java.vm.vendor"</span>));
+
+        <span class="cmt">// Runtime is the JVM's self-description object; getRuntime() hands us the</span>
+        <span class="cmt">// single instance for THIS running JVM. maxMemory() answers "how big is the</span>
+        <span class="cmt">// heap allowed to grow?" in bytes. A long, because byte counts overflow an</span>
+        <span class="cmt">// int past ~2 GB.</span>
+        <span class="kw">long</span> maxHeapBytes = <span class="ty">Runtime</span>.<span class="fn">getRuntime</span>().<span class="fn">maxMemory</span>();
+
+        <span class="cmt">// Divide bytes down to megabytes purely for readability; 4096 MB reads more</span>
+        <span class="cmt">// clearly than 4294967296. Lesson 03 explores the heap this number describes.</span>
+        <span class="ty">System</span>.out.<span class="fn">println</span>(<span class="str">"Max heap     : "</span> + (maxHeapBytes / (<span class="num">1024</span> * <span class="num">1024</span>)) + <span class="str">" MB"</span>);
+
+        <span class="cmt">// How many CPU cores the JVM believes it may use. The JVM sizes its GC</span>
+        <span class="cmt">// threads from this - important when we study GC in Lessons 04 and 05.</span>
+        <span class="ty">System</span>.out.<span class="fn">println</span>(<span class="str">"CPU cores    : "</span> + <span class="ty">Runtime</span>.<span class="fn">getRuntime</span>().<span class="fn">availableProcessors</span>());
+    }
+}</code></pre>
+
+      <p>One term in there needs its proper introduction: the JVM sets aside one big pool of memory where every object your program creates with <code>new</code> is stored; that pool is called the <strong><span class="term" tabindex="0" data-def="The single pool of memory where every object created with `new` lives. Managed and garbage-collected by the JVM.">heap</span></strong>. The number we print is its allowed maximum size — by default the JVM picks it from your machine's RAM (commonly around one quarter of it — verify on your machine; that default varies by version and setup). The heap is the main stage of Lessons 03–05; today we only read its size.</p>
+
+      <p><strong>What this adds:</strong> jvm-explorer now exists, builds, runs, and tests — and its first capability is self-inspection: it makes the invisible engine introduce itself (version, engine name, vendor, heap ceiling, CPU count), and its tests turn the course's version agreement into an enforced fact rather than a hope.</p>
+
+      <p><strong>Numbered trace of a run</strong> (<code>mvn compile exec:java</code> from <code>jvm-explorer/</code>):</p>
+      <ol>
+        <li>Maven reads <code>pom.xml</code>, compiles anything out of date into <code>target/classes/</code>.</li>
+        <li>The exec plugin reads its configured main class, <code>com.corejava.jvm.JvmExplorer</code>.</li>
+        <li>Inside the already-running Maven JVM, <code>JvmExplorer.main</code> is invoked.</li>
+        <li>The banner prints; then five questions are put to the running JVM — three to the system-properties table (version, engine name, vendor) and two to the <code>Runtime</code> object (heap ceiling, CPU count).</li>
+        <li>Each answer prints as one labelled line; <code>main</code> returns; Maven reports success.</li>
+      </ol>
+
+      <div class="callout note">
+        <p><strong>Predicted output of <code>mvn compile exec:java</code></strong> (Maven's <code>[INFO]</code> lines trimmed; your exact numbers <em>will</em> differ — version patch level, heap size, and core count are facts about <em>your</em> machine, which is precisely the point):</p>
+      </div>
+      <pre class="terminal"><code><span class="out">=== jvm-explorer: hello from inside the JVM ===</span>
+Java version : 21.0.7
+JVM name     : OpenJDK 64-Bit Server VM
+JVM vendor   : Eclipse Adoptium
+Max heap     : 4096 MB
+CPU cores    : 8
+<span class="out">[INFO] BUILD SUCCESS</span></code></pre>
+
+      <div class="callout tryit">
+        <p>Run it and compare — the two lines most worth checking: <em>Java version</em> starts with <code>21</code>, and <em>JVM vendor</em> names the vendor you actually installed. <strong>Project state: compiles, 3 tests green</strong> (predicted — confirm with <code>mvn test</code>).</p>
+      </div>
+
+      <details class="check">
+        <summary>Why does <code>maxHeapBytes</code> have to be a <code>long</code>, not an <code>int</code>?</summary>
+        <div class="answer-body">An <code>int</code> maxes out near 2.1 billion (~2 GB). Heap sizes are byte counts that routinely exceed that (4 GB = ~4.29 billion bytes), so an <code>int</code> would overflow into a wrong (often negative) number. A <code>long</code> holds far larger counts safely.</div>
+      </details>
+    </section>
+
+    <!-- ===================== SECTION 7 — IN THE WILD ===================== -->
+    <section id="s7">
+      <h2><span class="sec-num">7</span> In the wild</h2>
+
+      <p>The exact self-inspection APIs we used are what real infrastructure uses to adapt to the machine it lands on. The clearest sighting: <code>Runtime.getRuntime().availableProcessors()</code> — our last line — is how the JDK's own concurrency machinery sizes itself. <code>ForkJoinPool.commonPool()</code>, the thread pool that silently powers parallel streams (<code>list.parallelStream()…</code>), calls it to decide how many worker threads to create; that is why the same jar uses 4 workers on your laptop and 32 on a server, with no configuration anywhere. The JVM itself does the same when choosing how many GC threads to run — we will see those threads with our own eyes in the GC log in Lesson 05. And build tools report their world the same way: look at the top of your own <code>mvn -version</code> output — Java version, vendor, OS — that is Maven doing exactly what <code>JvmExplorer.main</code> does, for exactly the same reason.</p>
+
+      <div class="callout realworld">
+        <p>On a real team, the very first question when something misbehaves in production is never &ldquo;what's the bug?&rdquo; — it's <strong>&ldquo;what machine, what engine, what version?&rdquo;</strong> Every deploy pipeline, container image, and incident runbook starts by printing exactly what <code>JvmExplorer</code> prints. In interviews, being able to explain why <code>java -version</code> and <code>mvn -version</code> can disagree marks you as someone who has actually shipped Java, not just written it.</p>
+      </div>
+    </section>
+
+    <!-- ===================== SECTION 8 — GOTCHAS ===================== -->
+    <section id="s8">
+      <h2><span class="sec-num">8</span> Gotchas and common mistakes</h2>
+      <ul>
+        <li><strong>Verifying in a stale terminal.</strong> Installers edit PATH/JAVA_HOME, but an already-open terminal keeps its old copies, so <code>java -version</code> seems broken (or seems fine when it is not). Always open a <strong>fresh</strong> terminal after installing; in doubt, restart the IDE too.</li>
+        <li><strong><code>java -version</code> right, <code>mvn -version</code> wrong.</strong> The two can disagree: <code>java</code> is found via PATH, but Maven picks its JVM via JAVA_HOME. Read the <code>Java version:</code> line inside <code>mvn -version</code> output — it must say 21. (This is exactly what the simulation above modelled.)</li>
+        <li><strong>Running <code>mvn</code> from the wrong folder.</strong> Maven needs <code>pom.xml</code> in the <em>current</em> folder; from the repo root you get <code>there is no POM in this directory</code>. All <code>mvn</code> commands in this course run from inside <code>jvm-explorer/</code>.</li>
+        <li><strong>JDK 8 muscle memory / old tutorials.</strong> Half the internet's Java setup advice predates modern versions — separate JRE downloads, <code>CLASSPATH</code> variables, ancient POM snippets that misbehave with JUnit 5 (the classic symptom: <code>Tests run: 0</code> — silent skipping, not failure). Trust the pinned setup here.</li>
+        <li><strong>Trusting the IDE's green checkmark over Maven's.</strong> IntelliJ may run tests with its own bundled JDK and runner, so IDE-green and <code>mvn test</code>-green can differ. The command line is the referee; if they disagree, believe <code>mvn test</code> and fix the IDE's SDK setting.</li>
+      </ul>
+    </section>
+
+    <!-- ===================== SECTION 9 — TRADEOFFS ===================== -->
+    <section id="s9">
+      <h2><span class="sec-num">9</span> Tradeoffs and when not to use this</h2>
+
+      <p>Honesty about the cost: this ceremony is real overhead. For a 30-line throwaway experiment, Maven + Git + tests is a sledgehammer for a thumbtack — <code>javac One.java &amp;&amp; java One</code> (or since Java 11, just <code>java One.java</code>, which compiles in memory) is the right tool, and <em>inside this course</em> such throwaways go into a labelled <code>experiments/</code> package rather than getting projects of their own. Pinning has a cost too: it is a promise to <em>manage</em> versions, not a way to stop thinking about them — real teams schedule upgrades deliberately (new patch releases carry security fixes; staying pinned forever quietly becomes staying vulnerable), and we will bump our pins deliberately if the series ever needs to. Maven's fixed conventions trade flexibility for uniformity — for odd layouts and exotic builds, its rigidity fights you, which is roughly why Gradle exists. And every-line comments plus environment tests are teaching devices dialed to maximum for this course; production code comments the <em>why that is not obvious</em>, not every line. What does <strong>not</strong> scale down, ever, for any project another human (including future-you) will touch: <code>.gitignore</code> before first commit, and versions written down rather than remembered.</p>
+    </section>
+
+    <!-- ===================== SECTION 10 — TAKEAWAYS ===================== -->
+    <section id="s10">
+      <h2><span class="sec-num">10</span> Key takeaways</h2>
+      <ul>
+        <li>The JVM is a program that acts out an imaginary standard machine, which is why compiled Java runs unchanged on any real machine that has a JVM; the JDK is that engine plus the developer tools, and it is what you install.</li>
+        <li>This series pins Java 21 (LTS), Maven 3.9.x, and JUnit 5.13.4 in committed files, because unpinned versions drift silently between machines and over time, and drifting versions poison every observation a JVM course makes.</li>
+        <li>Maven turns one committed description (<code>pom.xml</code>) into an identical build anywhere: it fetches declared dependencies by their three coordinates from Maven Central, pins plugins, and enforces one folder layout with all generated output confined to the never-committed <code>target/</code>.</li>
+        <li><code>mvn test</code> runs the project's JUnit tests and is the standing one-command answer to &ldquo;did I break anything?&rdquo; — and jvm-explorer's very first tests guard the environment itself, failing loudly if the running JVM is not the pinned Java 21.</li>
+        <li><code>.gitignore</code> must exist before the first <code>git add .</code>, because Git ignores files only until they are committed — after that they are in history for good; each lesson ends with one commit pushed to GitHub.</li>
+      </ul>
+    </section>
+
+    <!-- ===================== SECTION 11 — CHALLENGE ===================== -->
+    <section id="s11">
+      <h2><span class="sec-num">11</span> Challenge</h2>
+
+      <p>Using only this lesson: your friend clones the repo, runs <code>mvn test</code> inside <code>jvm-explorer/</code>, and gets <code>BUILD FAILURE</code>. The failing test is <code>runsOnPinnedJavaVersion</code> with <code>Expected Java 21 ... but was: 17</code>. Meanwhile <code>java -version</code> in their terminal prints <code>openjdk version "21.0.7"</code>. (1) Explain precisely how <em>both</em> outputs can be true at once. (2) Name the one command from this lesson that reveals which Java Maven is really using. (3) Say what to fix. Bonus: why is it <em>good</em> that this failure happened on day one?</p>
+
+      <p><em>Tip: replay it in the simulation above — set PATH to &ldquo;JDK 21 first&rdquo; and JAVA_HOME to &ldquo;JDK 17&rdquo;, and watch the two commands split.</em></p>
+
+      <details class="answer">
+        <summary>Click to reveal the answer</summary>
+
+        <p><strong>(1) How both can be true:</strong> two different lookup mechanisms choose the JVM in the two cases. The terminal finds <code>java</code> by walking the <strong>PATH</strong> folder list — and on this machine that walk reaches Java 21 first. Maven ignores that walk and launches the JVM named by <strong>JAVA_HOME</strong> — which on this machine points at an installed JDK 17. So the terminal's Java really is 21 <em>and</em> the Java running the tests really is 17; the two facts describe two different JVMs on the same box. The test asserted the <em>actual running</em> JVM's major version (<code>Runtime.version().feature()</code>), which is exactly why it caught what <code>java -version</code> could not.</p>
+
+        <p><strong>(2) The revealing command:</strong> <code>mvn -version</code> — its output includes a <code>Java version:</code> line stating which JVM Maven itself is running on (and the <code>runtime:</code> path shows where it lives, i.e. what JAVA_HOME resolved to).</p>
+
+        <p><strong>(3) The fix:</strong> point JAVA_HOME at the JDK 21 install folder (Windows: <em>Edit environment variables for your account</em> → set <code>JAVA_HOME</code> to e.g. <code>C:\Program Files\Eclipse Adoptium\jdk-21…</code>), open a <strong>fresh</strong> terminal (a stale one keeps the old value — Gotcha #1), confirm <code>mvn -version</code> now says <code>Java version: 21</code>, then re-run <code>mvn test</code>.</p>
+
+        <pre class="terminal"><code><span class="cmt"># PREDICTED OUTPUT after the fix (trimmed):</span>
+<span class="out">[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0</span>
+<span class="out">[INFO] BUILD SUCCESS</span></code></pre>
+
+        <p><strong>Bonus:</strong> because the mismatch surfaced as one loud, named, message-bearing test failure on day one — instead of surfacing weeks later as JVM behavior that quietly contradicts the lesson text with no error at all. That trade — invisible drift exchanged for an immediate labelled failure — is the entire reason <code>runsOnPinnedJavaVersion</code> exists, and the entire point of pinning.</p>
+      </details>
+    </section>
+
+    <!-- ===================== SECTION 12 — ALMANAC ===================== -->
+    <section id="s12">
+      <h2><span class="sec-num">12</span> Almanac update</h2>
+      <p>Added to <code>almanac.md</code> this lesson: the pinned-version table for the series; <em>JDK = build + run, JRE = run only, JVM = the engine</em>; <code>.gitignore</code> before first <code>git add .</code> (post-commit ignoring does not un-commit); PATH picks your terminal's <code>java</code>, JAVA_HOME picks Maven's (check <code>mvn -version</code>, not just <code>java -version</code>, and always in a fresh terminal); <code>mvn test</code> as the standing regression check; never commit <code>target/</code>; the machine's real output always beats my prediction.</p>
+    </section>
+
+    <!-- ===================== SECTION 13 — WHAT IS NEXT ===================== -->
+    <section id="s13">
+      <div class="nextup">
+        <p class="kicker">What is next</p>
+        <h2>Lesson 01 — How Java actually runs</h2>
+        <p>The toolchain now proves its own identity — so we can finally ask the first real question of the course: what <em>is</em> the <code>.class</code> file that <code>javac</code> produced in <code>target/classes/</code>, and what do its instructions look like? Lesson 01 follows one tiny method from source code to bytecode, disassembles it with <code>javap -c</code>, and reads the JVM's own instruction language line by line.</p>
+      </div>
+    </section>
+
+    <p class="position">Lesson 00 of 07 — Core Java Course 01: JVM Internals &amp; Memory Management</p>
+
+  </main>
+</div>
+</body>
+</html>
