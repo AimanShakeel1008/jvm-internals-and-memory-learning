@@ -10,10 +10,13 @@ The course text is a self-contained HTML learning system — open **[`lessons/in
 
 `jvm-explorer/` is a Maven project built to provoke and observe the JVM itself. Lesson by lesson it gains modules that fill heap regions on purpose, trigger and parse GC logs, watch classes load, overflow the stack on demand, and expose JIT behavior.
 
-**Current capabilities (after Lesson 00):**
+**Current capabilities (after Lesson 01):**
 
 - Self-inspection: prints the running JVM's Java version, JVM name (HotSpot), vendor, maximum heap size, and CPU core count.
-- Environment tests: the build fails loudly if the running JVM is not the pinned Java 21.
+- Class file inspection: reads any loaded class's own `.class` bytes off the class path and decodes the eight-byte header — magic number, minor version, and major version turned into a Java release name.
+- Disassembly subjects: four deliberately tiny methods (`BytecodeSubject`) built to be read with `javap -c -p`.
+- Warm-up experiment: times the same method ten times over to make JIT compilation visible (labelled for-learning-only; real measurement uses JMH).
+- Tests: the build fails loudly if the running JVM is not the pinned Java 21, if class files are not compiled to Java 21, or if the two disagree.
 
 ## Requirements (pinned for the whole series)
 
@@ -31,6 +34,13 @@ All commands run from inside `jvm-explorer/`:
 mvn test                 # compile everything and run all tests (the regression check)
 mvn compile exec:java    # run the main program (com.corejava.jvm.JvmExplorer)
 mvn clean                # delete generated output (target/) for a fresh build
+
+# run the labelled warm-up experiment instead of the default main class
+mvn compile exec:java -Dexec.mainClass=com.corejava.jvm.experiments.WarmupExperiment
+
+# read the bytecode of the disassembly samples (after mvn compile)
+javap -c -p target/classes/com/corejava/jvm/BytecodeSubject.class
+javap -v target/classes/com/corejava/jvm/BytecodeSubject.class
 ```
 
 ## Repository layout

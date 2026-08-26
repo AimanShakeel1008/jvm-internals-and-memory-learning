@@ -1,0 +1,1385 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lesson 01 — How Java Actually Runs · JVM Internals &amp; Memory</title>
+  <link rel="stylesheet" href="../../assets/lesson.css">
+</head>
+<body>
+<div class="page">
+
+  <!-- ============================ TOC SIDEBAR ============================ -->
+  <aside class="toc">
+    <p class="toc-title">On this page</p>
+    <ol>
+      <li><a href="#s1">1 · The pain</a></li>
+      <li><a href="#s2">2 · Real-world analogy</a></li>
+      <li><a href="#s3">3 · The concept</a></li>
+      <li><a href="#s4">4 · The wrong way</a></li>
+      <li><a href="#s5">5 · The right way</a></li>
+      <li><a href="#s6">6 · Applied to jvm-explorer</a></li>
+      <li><a href="#s7">7 · In the wild</a></li>
+      <li><a href="#s8">8 · Gotchas</a></li>
+      <li><a href="#s9">9 · Tradeoffs</a></li>
+      <li><a href="#s10">10 · Key takeaways</a></li>
+      <li><a href="#s11">11 · Challenge</a></li>
+      <li><a href="#s12">12 · Almanac update</a></li>
+      <li><a href="#s13">13 · What is next</a></li>
+    </ol>
+    <nav class="toc-nav" aria-label="Course navigation">
+      <a class="navcard" href="../chapter-00-setup/lesson-00-full-setup.html">
+        <span class="navkicker">← Prev · Lesson 00</span>
+        <span class="navtitle">Full Setup</span>
+      </a>
+      <a class="navmap" href="../../index.html">↑ Course map</a>
+      <span class="navcard disabled">
+        <span class="navkicker">Next · Lesson 02 →</span>
+        <span class="navtitle">Class loading</span>
+        <span class="navnote">not yet written</span>
+      </span>
+    </nav>
+  </aside>
+
+  <!-- ============================ MAIN CONTENT ============================ -->
+  <main>
+
+    <header class="banner">
+      <p class="kicker">Core Java · Course 01 · JVM Internals &amp; Memory</p>
+      <h1>Lesson 01 — How Java Actually Runs</h1>
+      <p class="subtitle">Open the black box between the code you type and the behaviour you observe: the class file, the instruction set inside it, and the two ways the JVM runs those instructions.</p>
+      <p class="meta">
+        <strong>Position:</strong> Lesson 01 of 07 &nbsp;·&nbsp;
+        <strong>Prerequisites:</strong> <a href="../chapter-00-setup/lesson-00-full-setup.html">Lesson 00 — Full Setup</a> &nbsp;·&nbsp;
+        <strong>Project files:</strong> <code>BytecodeSubject.java</code>, <code>ClassFileHeader.java</code>, <code>ClassFileInspector.java</code>, <code>experiments/WarmupExperiment.java</code>, <code>JvmExplorer.java</code> (modified), and three test classes
+      </p>
+    </header>
+
+    <!-- ===================== SECTION 1 — THE PAIN ===================== -->
+    <section id="s1">
+      <h2><span class="sec-num">1</span> The pain</h2>
+
+      <p>Priya finishes a small tool, builds it, and emails the finished file to Sam so he can try it. Sam double-clicks. Nothing happens. He runs it from a terminal instead, and gets this:</p>
+
+      <pre class="terminal"><code>Exception in thread "main" java.lang.UnsupportedClassVersionError:
+        com/example/Tool has been compiled by a more recent version of the Java
+        Runtime (class file version 65.0), this runtime only recognizes class
+        file version 61.0</code></pre>
+
+      <p>Read that message as a beginner and almost every word raises a question. <em>Compiled by a more recent version</em> — but Java was supposed to be &ldquo;write once, run anywhere,&rdquo; so why does the compiler's version matter after compiling is finished? <em>Class file version 65.0</em> — what is a class file, and why does it have a version number of its own, one that matches no Java release Sam has ever heard of? And <em>this runtime only recognizes 61.0</em> — where is that number stored, who checks it, and at what moment? Without knowing what the compiler actually produced, Sam cannot even search for the answer usefully; he can only paste the error into a forum and hope.</p>
+
+      <p>Here is a second, quieter pain, and it is the one that lasts a career. Someone asks you: &ldquo;is <code>total += i</code> in a loop expensive?&rdquo; Or: &ldquo;why is joining strings with <code>+</code> inside a loop such a famous mistake?&rdquo; Or, from a code review: &ldquo;this method creates an object every call — does that matter?&rdquo; If the space between your source code and the machine's behaviour is a black box, every one of those questions can only be answered by folklore — something you half-remember from a blog post. You cannot reason, you can only recite. And this course is entirely about that space, so leaving it closed now means guessing at everything that follows: where objects live, when they are collected, why the tenth run is faster than the first.</p>
+
+      <p>Which is the third pain, and the strangest one. Run the same loop ten times in a row on the same data, and time each run. The first takes maybe forty milliseconds. The tenth takes two. Nothing changed — not the code, not the input, not the machine. If you do not know that the JVM has <em>two different ways</em> of running your instructions and quietly switches between them, that measurement looks like a broken stopwatch. People genuinely dismiss it as noise, or worse, publish it as a benchmark.</p>
+
+      <p>The cure for all three is the same, and it is unglamorous: <strong>look at what the compiler actually produced.</strong> The <code>.class</code> file is not magic and it is not encrypted. It is a documented binary format with a fixed shape, holding instructions written in a small, learnable language. By the end of this lesson you will have read the file's first eight bytes with your own code, disassembled four methods and understood every instruction in them, and watched the JVM's second execution mode kick in on your own machine.</p>
+    </section>
+
+    <!-- ===================== SECTION 2 — ANALOGY ===================== -->
+    <section id="s2">
+      <h2><span class="sec-num">2</span> Real-world analogy</h2>
+
+      <p>A composer writes a piece of music. It gets performed in Tokyo, Lagos and Oslo, by orchestras that have never met the composer and do not speak the composer's language. How?</p>
+
+      <p>Not by shipping recordings, and not by re-writing the piece for each country. By <strong>sheet music</strong>: a standardised written notation that every trained musician on Earth can read. The composer's ideas are written once, into notation; each orchestra reads that same notation and produces sound using its own local instruments, in its own hall, with its own acoustics.</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>The concert world</th><th>The Java world</th></tr></thead>
+          <tbody>
+            <tr><td>The composer's ideas, written out in a personal shorthand</td><td>Your <code>.java</code> source file — written for humans</td></tr>
+            <tr><td>The engraver who turns that shorthand into clean standard notation</td><td><code>javac</code>, the compiler</td></tr>
+            <tr><td>The printed score in standard notation</td><td>The <code>.class</code> file — <strong>bytecode</strong></td></tr>
+            <tr><td>&ldquo;Notation edition 2024&rdquo; printed on the score's first page</td><td>The class file's <strong>version number</strong> (65 = Java 21)</td></tr>
+            <tr><td>The orchestra that reads the score and performs it</td><td>The <strong>JVM</strong></td></tr>
+            <tr><td>The actual violins, drums and air in the room</td><td>The real CPU and its own instruction set</td></tr>
+            <tr><td>Sight-reading the first pass — correct, but slow and note-by-note</td><td>The <strong>interpreter</strong></td></tr>
+            <tr><td>A passage rehearsed so often it is played fluently from memory</td><td><strong>JIT-compiled</strong> machine code</td></tr>
+            <tr><td>A 2024 score handed to players who only read the 2019 edition</td><td><code>UnsupportedClassVersionError</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>Three details of the analogy are worth pressing on, because each maps onto something exact.</p>
+
+      <p><strong>The score is not the sound.</strong> Nobody confuses a page of notation with music. Yet people routinely say Java is &ldquo;compiled to machine code,&rdquo; which is the same confusion. The <code>.class</code> file is notation: precise, complete, and totally silent until an orchestra performs it.</p>
+
+      <p><strong>The edition number is on the page for a reason.</strong> Notation evolves; new symbols get added. Players who trained on an older edition will hit a symbol they cannot read — so responsible publishers print the edition on the front, and a conductor checks it before rehearsal rather than discovering the problem mid-concert. That printed edition number is <em>exactly</em> what Sam's error message was about, and the JVM checks it in the first eight bytes of the file before executing a single instruction.</p>
+
+      <p><strong>Rehearsal changes the performance without changing the score.</strong> The tenth playthrough of a passage is faster and smoother than the first, and the page did not change. That is the whole of the interpreter-versus-JIT story, and it is why the same loop takes forty milliseconds and then two.</p>
+    </section>
+
+    <!-- ===================== SECTION 3 — CONCEPT ===================== -->
+    <section id="s3">
+      <h2><span class="sec-num">3</span> The concept explained</h2>
+
+      <p>We will build this up in dependency order: what a CPU actually eats, what Java produces instead, how those instructions are shaped, how the file that holds them is laid out, how to read it with a tool, and finally how the <span class="term" tabindex="0" data-def="Java Virtual Machine: the program that runs compiled Java, owns its memory, and manages garbage collection and JIT compilation.">JVM</span> executes it in two modes at once. Nothing here is skipped as &ldquo;it just works.&rdquo;</p>
+
+      <h3>3.1 What a computer can actually run</h3>
+
+      <p>Underneath everything sits a physical chip: the CPU (central processing unit), the part of the machine that carries out instructions. A CPU understands exactly one language, and it is nothing like Java. It is a list of very small numbered commands — <em>copy this number into that slot; add these two slots; if the result is zero, continue from that position instead.</em> Each command is stored as a number, because numbers are all a chip can hold. This numeric command language is called <strong>machine code</strong>, and the specific set of commands a family of chips understands is called its <strong>instruction set</strong>.</p>
+
+      <p>Here is the catch that shapes everything else: different chip families have <em>different, incompatible</em> instruction sets. The Intel and AMD chips in most laptops use one (called x86-64, often just &ldquo;x64&rdquo;); Apple Silicon Macs and most phones use another (ARM). The number that means &ldquo;add&rdquo; on one is not the number that means &ldquo;add&rdquo; on the other. On top of that, operating systems disagree about how a program starts, how it asks for memory, and how it opens a file.</p>
+
+      <p>So a language like C, which compiles straight to machine code, produces a file that runs on <em>one</em> chip family and <em>one</em> operating system. Want it on another? Compile it again, there, with a compiler that targets that combination. The word for &ldquo;machine code for the actual chip you are on&rdquo; is <strong>native code</strong> — you will meet the word constantly, and that is all it means: not translated, not simulated, the real thing the chip runs directly.</p>
+
+      <details class="check">
+        <summary>Why can a compiled C program not simply be copied from a Windows laptop to a Mac?</summary>
+        <div class="answer-body">Because it is machine code for one specific instruction set and one operating system's conventions. The Mac's chip may not even use the same numbers for the same operations, and the operating system starts programs and hands out memory differently. The file is a set of instructions addressed to a machine that is not there.</div>
+      </details>
+
+      <h3>3.2 What Java produces instead: bytecode</h3>
+
+      <p>Java's designers took a deliberate detour. <span class="term" tabindex="0" data-def="The Java compiler: the JDK tool that turns .java source files into .class files the JVM can execute."><code>javac</code></span> does not produce machine code for your chip. It produces instructions for an <em>imaginary</em> machine — one carefully specified on paper, that no manufacturer has ever built. That imaginary machine has its own small instruction set, and because each of its instruction codes fits in a single byte, the instructions are called <strong>bytecode</strong>.</p>
+
+      <p>Let us be precise about the pieces, since these words get used loosely everywhere.</p>
+
+      <ul>
+        <li>An <strong>opcode</strong> (short for &ldquo;operation code&rdquo;) is the one-byte number that says which operation to perform. One byte holds 0 to 255, so the format allows at most 256 different operations; the specification defines a little over two hundred of them, and the rest are unused. That upper limit is why they are called <em>byte</em>codes.</li>
+        <li>Some opcodes are followed by <strong>operands</strong>: extra bytes giving details, such as <em>which</em> local variable to read or <em>where</em> to jump to. So an instruction is one opcode byte plus zero or more operand bytes.</li>
+        <li>Each opcode has a short human name — <code>iadd</code>, <code>iload_0</code>, <code>goto</code> — called its <strong>mnemonic</strong>. The file stores the number; tools show you the mnemonic. When people say &ldquo;reading bytecode,&rdquo; they mean reading these names.</li>
+      </ul>
+
+      <p>Now the payoff. Since bytecode targets an imaginary machine, it is identical no matter where it was produced. To run it on a real machine, that machine needs one program installed whose job is to <em>act out</em> the imaginary machine — read its instructions and carry them out using whatever real chip is underneath. That program is the JVM. This is what the slogan <strong>&ldquo;write once, run anywhere&rdquo;</strong> (often abbreviated <strong>WORA</strong>) actually describes: not that Java source is portable — most languages' source is portable if you have a compiler — but that the <em>compiled output</em> is portable. The compiling happens once, on one machine, and the resulting file is shipped everywhere.</p>
+
+      <figure class="fig">
+        <svg viewBox="0 0 720 300" role="img" aria-label="A pipeline: a dot-java source file feeds javac, which produces one dot-class bytecode file. That single file then feeds three different JVMs — on Windows, Linux and macOS — and each JVM produces machine code for its own CPU.">
+          <defs>
+            <marker id="l1ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path class="fig-arrow-h" d="M0,0 L10,5 L0,10 z"/>
+            </marker>
+            <marker id="l1aa" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path class="fig-arrow-accent-h" d="M0,0 L10,5 L0,10 z"/>
+            </marker>
+          </defs>
+
+          <!-- source (learner's own = amber) -->
+          <rect class="fig-code" x="10" y="30" width="140" height="56" rx="10"/>
+          <text class="fig-label" x="80" y="54" text-anchor="middle">Tool.java</text>
+          <text class="fig-small" x="80" y="72" text-anchor="middle">text you write</text>
+
+          <!-- javac (tool = teal) -->
+          <rect class="fig-infra" x="190" y="30" width="120" height="56" rx="10"/>
+          <text class="fig-label" x="250" y="54" text-anchor="middle">javac</text>
+          <text class="fig-small" x="250" y="72" text-anchor="middle">compiles once</text>
+
+          <!-- class file (the artifact you ship = amber) -->
+          <rect class="fig-code" x="350" y="30" width="180" height="56" rx="10"/>
+          <text class="fig-label" x="440" y="54" text-anchor="middle">Tool.class</text>
+          <text class="fig-small" x="440" y="72" text-anchor="middle">bytecode · one portable file</text>
+
+          <path class="fig-arrow" d="M152,58 L186,58" marker-end="url(#l1ah)"/>
+          <path class="fig-arrow" d="M312,58 L346,58" marker-end="url(#l1ah)"/>
+
+          <!-- fan out to three JVMs -->
+          <path class="fig-arrow-accent" d="M440,90 L130,164" marker-end="url(#l1aa)"/>
+          <path class="fig-arrow-accent" d="M440,90 L360,164" marker-end="url(#l1aa)"/>
+          <path class="fig-arrow-accent" d="M440,90 L592,164" marker-end="url(#l1aa)"/>
+
+          <rect class="fig-infra" x="40" y="168" width="176" height="52" rx="10"/>
+          <text class="fig-label" x="128" y="190" text-anchor="middle">JVM on Windows</text>
+          <text class="fig-small" x="128" y="208" text-anchor="middle">acts out the imaginary machine</text>
+
+          <rect class="fig-infra" x="272" y="168" width="176" height="52" rx="10"/>
+          <text class="fig-label" x="360" y="190" text-anchor="middle">JVM on Linux</text>
+          <text class="fig-small" x="360" y="208" text-anchor="middle">same bytecode, same rules</text>
+
+          <rect class="fig-infra" x="504" y="168" width="176" height="52" rx="10"/>
+          <text class="fig-label" x="592" y="190" text-anchor="middle">JVM on macOS</text>
+          <text class="fig-small" x="592" y="208" text-anchor="middle">same bytecode, same rules</text>
+
+          <path class="fig-arrow" d="M128,222 L128,240" marker-end="url(#l1ah)"/>
+          <path class="fig-arrow" d="M360,222 L360,240" marker-end="url(#l1ah)"/>
+          <path class="fig-arrow" d="M592,222 L592,240" marker-end="url(#l1ah)"/>
+
+          <rect class="fig-generic" x="40" y="244" width="176" height="44" rx="9"/>
+          <text class="fig-small" x="128" y="262" text-anchor="middle">x64 machine code</text>
+          <text class="fig-small" x="128" y="278" text-anchor="middle">Intel / AMD chip</text>
+
+          <rect class="fig-generic" x="272" y="244" width="176" height="44" rx="9"/>
+          <text class="fig-small" x="360" y="262" text-anchor="middle">x64 machine code</text>
+          <text class="fig-small" x="360" y="278" text-anchor="middle">Intel / AMD chip</text>
+
+          <rect class="fig-generic" x="504" y="244" width="176" height="44" rx="9"/>
+          <text class="fig-small" x="592" y="262" text-anchor="middle">ARM machine code</text>
+          <text class="fig-small" x="592" y="278" text-anchor="middle">Apple Silicon chip</text>
+        </svg>
+        <figcaption><strong>Compile once, on the left. Run anywhere, below.</strong> Amber = files you own and ship; teal = the JVM doing the acting-out; grey = the real machine underneath, which differs everywhere. The narrow waist in the middle — one <code>.class</code> file — is the entire trick.</figcaption>
+      </figure>
+
+      <h3>3.3 The imaginary machine is a stack machine</h3>
+
+      <p>What kind of machine did Java's designers imagine? A deliberately simple one. To follow any bytecode at all you need exactly two of its parts.</p>
+
+      <p><strong>Part one: the local variable table.</strong> Every method call gets a small private array of numbered slots to keep its variables in. Slot 0, slot 1, slot 2, and so on. Your variable names (<code>a</code>, <code>total</code>, <code>i</code>) do not exist at this level — they became slot numbers during compilation. For a <code>static</code> method, slot 0 holds the first parameter. For an instance method, slot 0 always holds <code>this</code>, and the parameters start at slot 1; that is the whole reason the numbering seems to shift by one between the two kinds of method.</p>
+
+      <p><strong>Part two: the operand stack.</strong> This is the part that surprises people, so here is the idea before the name. Imagine a spike on a desk that you can push paper slips onto, and from which you may only ever take the topmost slip. To add two numbers you write each on a slip, push both onto the spike, then run an &ldquo;add&rdquo; step which takes the top two slips off, adds them, and pushes one new slip with the answer. Nothing is addressed or named; everything happens at the top of the pile. A pile you can only add to and take from at one end is called a <strong>stack</strong>, pushing on and taking off are called <em>push</em> and <em>pop</em>, and the one the JVM uses for calculations is the <strong>operand stack</strong>. A machine that computes this way — rather than by naming registers, as real CPUs do — is called a <strong>stack machine</strong>.</p>
+
+      <p>Why choose a stack machine for the imaginary machine? Because it makes the instructions tiny and universal. <code>iadd</code> needs no operands at all — no &ldquo;add register 3 to register 7&rdquo; — because both inputs are, by definition, on top of the stack. That keeps bytecode compact, keeps the instruction set small, and means the format assumes nothing about how many registers the real chip happens to have. The real machine underneath has registers, of course, and mapping stack operations onto them is the JVM's job, not yours.</p>
+
+      <p>Now watch <code>add(7, 5)</code> — the first method in our project — run on that machine, one instruction at a time:</p>
+
+      <figure class="fig">
+        <svg viewBox="0 0 720 226" role="img" aria-label="Four snapshots of the operand stack while add(7,5) runs. After iload_0 the stack holds 7. After iload_1 it holds 7 with 5 on top. After iadd it holds a single value 12. After ireturn the stack is empty and 12 has been returned.">
+          <!-- snapshot 1 -->
+          <text class="fig-label" x="90" y="22" text-anchor="middle">0: iload_0</text>
+          <rect class="fig-generic" x="15" y="36" width="150" height="120" rx="10"/>
+          <rect class="fig-code" x="35" y="124" width="110" height="26" rx="6"/>
+          <text class="fig-mono" x="90" y="142" text-anchor="middle">7</text>
+          <text class="fig-small" x="90" y="176" text-anchor="middle">push local 0 (a)</text>
+
+          <!-- snapshot 2 -->
+          <text class="fig-label" x="265" y="22" text-anchor="middle">1: iload_1</text>
+          <rect class="fig-generic" x="190" y="36" width="150" height="120" rx="10"/>
+          <rect class="fig-code" x="210" y="124" width="110" height="26" rx="6"/>
+          <text class="fig-mono" x="265" y="142" text-anchor="middle">7</text>
+          <rect class="fig-code" x="210" y="92" width="110" height="26" rx="6"/>
+          <text class="fig-mono" x="265" y="110" text-anchor="middle">5</text>
+          <text class="fig-small" x="265" y="176" text-anchor="middle">push local 1 (b)</text>
+
+          <!-- snapshot 3 -->
+          <text class="fig-label" x="440" y="22" text-anchor="middle">2: iadd</text>
+          <rect class="fig-generic" x="365" y="36" width="150" height="120" rx="10"/>
+          <rect class="fig-accent2" x="385" y="124" width="110" height="26" rx="6"/>
+          <text class="fig-mono" x="440" y="142" text-anchor="middle">12</text>
+          <text class="fig-small" x="440" y="176" text-anchor="middle">pop 5 and 7, push 12</text>
+
+          <!-- snapshot 4 -->
+          <text class="fig-label" x="615" y="22" text-anchor="middle">3: ireturn</text>
+          <rect class="fig-generic" x="540" y="36" width="150" height="120" rx="10"/>
+          <text class="fig-small" x="615" y="100" text-anchor="middle">(empty)</text>
+          <text class="fig-small" x="615" y="176" text-anchor="middle">pop 12, hand it back</text>
+
+          <text class="fig-small" x="360" y="208" text-anchor="middle">locals for this call:  slot 0 = a = 7   ·   slot 1 = b = 5   (never changed by this method)</text>
+        </svg>
+        <figcaption><strong>Four instructions, read left to right.</strong> Grey box = the operand stack for this one call; amber slips = values pushed from locals; indigo = a value computed by the machine itself. The stack grows upward and ends empty — a well-formed method always leaves it that way.</figcaption>
+      </figure>
+
+      <p>Two rules follow from that picture and they hold for all bytecode. First, <strong>instructions carry their type in their name</strong>: the leading <code>i</code> in <code>iload</code>, <code>iadd</code>, <code>ireturn</code> means <em>int</em>. There are parallel families for <code>long</code> (<code>l</code>), <code>float</code> (<code>f</code>), <code>double</code> (<code>d</code>) and references — that is, anything that is an object rather than a plain number (<code>a</code>, for &ldquo;address&rdquo;). So <code>areturn</code> returns an object reference and <code>ireturn</code> returns an int; there is no single generic &ldquo;return a value&rdquo; instruction. Second, <strong>very common operations get their own single-byte shorthand</strong>: reading local slot 0 could be written as the two-byte instruction <code>iload 0</code>, but because it happens so often the format also defines a dedicated one-byte <code>iload_0</code>. That is why disassembly is full of names with underscores and small numbers glued on.</p>
+
+      <details class="check">
+        <summary>In a static method, which local slot holds the first parameter — and why is it different in an instance method?</summary>
+        <div class="answer-body">Slot 0. An instance method is always called <em>on</em> an object, and that object (<code>this</code>) is passed invisibly as an extra first argument, so it occupies slot 0 and the declared parameters begin at slot 1. This is why an instance method's disassembly usually starts with <code>aload_0</code> — that is the machine picking up <code>this</code>.</div>
+      </details>
+
+      <h3>3.4 The <code>.class</code> file: a documented binary format</h3>
+
+      <p>The bytecode has to live somewhere, and that somewhere is the <code>.class</code> file — one file per class, named after the class, produced by <code>javac</code> and placed by Maven in <code>target/classes/</code> mirroring the package folders. It is a <strong>binary</strong> file: it stores raw numbers rather than readable text, so opening it in a text editor shows nonsense. That is not obfuscation and it is not compression. The layout is published in the Java Virtual Machine Specification, and anything that follows the specification can read it — including code you write yourself, which is exactly what we build in Section 5.</p>
+
+      <p>Every class file begins with the same eight bytes, in the same order, always:</p>
+
+      <figure class="fig">
+        <svg viewBox="0 0 720 250" role="img" aria-label="The layout of a class file. The first eight bytes are shown individually: CA FE BA BE are the magic number, the next two bytes are the minor version, the next two the major version, here 00 41 which is 65 decimal. After that come the constant pool, access flags, this and super class, interfaces, fields, methods and attributes.">
+          <!-- byte offsets -->
+          <text class="fig-small" x="44" y="34" text-anchor="middle">0</text>
+          <text class="fig-small" x="84" y="34" text-anchor="middle">1</text>
+          <text class="fig-small" x="124" y="34" text-anchor="middle">2</text>
+          <text class="fig-small" x="164" y="34" text-anchor="middle">3</text>
+          <text class="fig-small" x="204" y="34" text-anchor="middle">4</text>
+          <text class="fig-small" x="244" y="34" text-anchor="middle">5</text>
+          <text class="fig-small" x="284" y="34" text-anchor="middle">6</text>
+          <text class="fig-small" x="324" y="34" text-anchor="middle">7</text>
+
+          <!-- the eight header bytes (amber = what our own code reads) -->
+          <rect class="fig-code" x="24" y="42" width="40" height="42" rx="6"/>
+          <text class="fig-mono" x="44" y="68" text-anchor="middle">CA</text>
+          <rect class="fig-code" x="64" y="42" width="40" height="42" rx="6"/>
+          <text class="fig-mono" x="84" y="68" text-anchor="middle">FE</text>
+          <rect class="fig-code" x="104" y="42" width="40" height="42" rx="6"/>
+          <text class="fig-mono" x="124" y="68" text-anchor="middle">BA</text>
+          <rect class="fig-code" x="144" y="42" width="40" height="42" rx="6"/>
+          <text class="fig-mono" x="164" y="68" text-anchor="middle">BE</text>
+          <rect class="fig-code" x="184" y="42" width="40" height="42" rx="6"/>
+          <text class="fig-mono" x="204" y="68" text-anchor="middle">00</text>
+          <rect class="fig-code" x="224" y="42" width="40" height="42" rx="6"/>
+          <text class="fig-mono" x="244" y="68" text-anchor="middle">00</text>
+          <rect class="fig-code" x="264" y="42" width="40" height="42" rx="6"/>
+          <text class="fig-mono" x="284" y="68" text-anchor="middle">00</text>
+          <rect class="fig-code" x="304" y="42" width="40" height="42" rx="6"/>
+          <text class="fig-mono" x="324" y="68" text-anchor="middle">41</text>
+
+          <!-- grouping brackets -->
+          <path class="fig-arrow" d="M26,92 L26,100 L182,100 L182,92"/>
+          <text class="fig-small" x="104" y="116" text-anchor="middle">magic — always CAFEBABE</text>
+          <path class="fig-arrow" d="M186,92 L186,100 L262,100 L262,92"/>
+          <text class="fig-small" x="224" y="116" text-anchor="middle">minor = 0</text>
+          <path class="fig-arrow" d="M266,92 L266,100 L342,100 L342,92"/>
+          <text class="fig-small" x="304" y="116" text-anchor="middle">major = 0x41 = 65</text>
+
+          <text class="fig-label" x="390" y="60" >← the 8 bytes ClassFileInspector reads</text>
+          <text class="fig-small" x="390" y="78" >everything the JVM checks before trusting the file</text>
+
+          <!-- the rest of the file -->
+          <text class="fig-heading" x="24" y="150">…then the rest of the file, in this fixed order:</text>
+          <rect class="fig-infra" x="24" y="164" width="130" height="46" rx="8"/>
+          <text class="fig-small" x="89" y="184" text-anchor="middle">constant pool</text>
+          <text class="fig-small" x="89" y="200" text-anchor="middle">names &amp; literals</text>
+
+          <rect class="fig-infra" x="162" y="164" width="96" height="46" rx="8"/>
+          <text class="fig-small" x="210" y="184" text-anchor="middle">access flags</text>
+          <text class="fig-small" x="210" y="200" text-anchor="middle">public, final…</text>
+
+          <rect class="fig-infra" x="266" y="164" width="110" height="46" rx="8"/>
+          <text class="fig-small" x="321" y="184" text-anchor="middle">this / super</text>
+          <text class="fig-small" x="321" y="200" text-anchor="middle">who am I, who</text>
+
+          <rect class="fig-infra" x="384" y="164" width="84" height="46" rx="8"/>
+          <text class="fig-small" x="426" y="190" text-anchor="middle">interfaces</text>
+
+          <rect class="fig-infra" x="476" y="164" width="72" height="46" rx="8"/>
+          <text class="fig-small" x="512" y="190" text-anchor="middle">fields</text>
+
+          <rect class="fig-code" x="556" y="164" width="76" height="46" rx="8"/>
+          <text class="fig-small" x="594" y="184" text-anchor="middle">methods</text>
+          <text class="fig-small" x="594" y="200" text-anchor="middle">the bytecode</text>
+
+          <rect class="fig-infra" x="640" y="164" width="72" height="46" rx="8"/>
+          <text class="fig-small" x="676" y="190" text-anchor="middle">attributes</text>
+
+          <text class="fig-small" x="24" y="232">Sizes are not to scale: in a real class file the constant pool and the methods take up almost all of the bytes.</text>
+        </svg>
+        <figcaption><strong>The shape of every class file.</strong> Amber = the parts this lesson touches directly (the eight-byte header our own code decodes, and the methods whose bytecode <code>javap</code> prints); teal = the other required sections. The order is fixed by the specification — that is what makes reading it possible at all.</figcaption>
+      </figure>
+
+      <p><strong>Bytes 0–3: the magic number.</strong> A <strong>magic number</strong> is a fixed value at the very start of a file that announces what kind of file it is. Renaming <code>photo.png</code> to <code>photo.txt</code> does not change what is inside it, so programs identify file types by their first few bytes rather than by name. Java's is <code>0xCAFEBABE</code> — four bytes that spell a word in hexadecimal, chosen by James Gosling's team as a joke that stuck. (Hexadecimal is base 16, using the digits 0–9 then A–F for ten to fifteen; it is convenient here because each byte is exactly two hex digits, so <code>CA FE BA BE</code> is precisely four bytes.) If those four bytes are anything else, the JVM stops immediately — it has been handed something that is not a class file.</p>
+
+      <p><strong>Bytes 4–5: the minor version. Bytes 6–7: the major version.</strong> Together they say which edition of the class file format these bytes follow. The major version is the one that matters. The numbering began at 45 for Java 1.1 and has added one per release ever since, which gives a rule you can do in your head:</p>
+
+      <div class="callout note">
+        <p><strong>Java release = major version − 44.</strong> So major 65 means Java 21 (65 − 44), major 61 means Java 17, major 52 means Java 8. Going the other way: Java 21 writes 65. The offset looks arbitrary because it is — it is a historical accident from 1996 that we are all stuck with.</p>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Major version</th><th>Java release</th><th>Note</th></tr></thead>
+          <tbody>
+            <tr><td>45</td><td>Java 1.1</td><td>where the numbering started</td></tr>
+            <tr><td>52</td><td>Java 8</td><td>still extremely common in old systems</td></tr>
+            <tr><td>55</td><td>Java 11</td><td>the previous long-term-support release</td></tr>
+            <tr><td>61</td><td>Java 17</td><td>the number in Sam's error message</td></tr>
+            <tr><td><strong>65</strong></td><td><strong>Java 21</strong></td><td><strong>what this course pins and what our build writes</strong></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>The minor version is almost always 0. It has exactly one use worth knowing: when a class is compiled with <em>preview features</em> enabled (experimental language features shipped for feedback, switched on with <code>--enable-preview</code>), the compiler writes <strong>65535</strong> — the largest value two bytes can hold — into the minor version as an unmistakable flag. The JVM then refuses to run that file unless it is exactly the same release <em>and</em> was started with preview features enabled too. This course never uses preview features, so every file we produce has minor version 0, and one of our tests asserts precisely that.</p>
+
+      <p>Now Sam's error decodes completely. His file's bytes 6–7 held 65; his JVM was a Java 17 JVM, which understands up to 61; the JVM read those two bytes before executing anything, saw a number from the future, and refused. The rule is one-directional and worth memorising: <strong>a newer JVM happily runs older class files; an older JVM always refuses newer ones.</strong> It must — the newer file may contain instructions or structures that did not exist when that JVM was built, and there is no safe way to guess at them.</p>
+
+      <p>The remaining sections of the file are named in the diagram above. Two deserve a sentence each now, because they show up in disassembly. The <strong>constant pool</strong> is a numbered table of everything the class refers to by name or value: string literals, the names of methods it calls, the names of classes it mentions. Rather than repeating <code>"java/lang/Object"</code> everywhere, the bytecode says &ldquo;entry #11&rdquo; — which is why disassembly is peppered with <code>#</code> numbers. The <strong>methods</strong> section holds, for each method, its name, its type signature and its actual bytecode. Everything else — access flags, this/super class, interfaces, fields, attributes — we will meet as later lessons need it, and Lesson 02 picks up exactly here, at the moment the JVM decides to load a class file at all.</p>
+
+      <h3>3.5 How types are written: descriptors</h3>
+
+      <p>One more piece of notation, because it appears in every line of disassembly and is pure gibberish until explained. The class file cannot store a method's type as friendly Java text like <code>int add(int, int)</code>; it needs something compact and unambiguous. So it uses a small code called a <strong>descriptor</strong>: each type becomes a letter, the parameter types go in brackets, and the return type follows.</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Descriptor</th><th>Java type</th><th>Memory hook</th></tr></thead>
+          <tbody>
+            <tr><td><code>I</code></td><td><code>int</code></td><td>I for int</td></tr>
+            <tr><td><code>J</code></td><td><code>long</code></td><td>L was taken, so long got J</td></tr>
+            <tr><td><code>D</code></td><td><code>double</code></td><td>D for double</td></tr>
+            <tr><td><code>F</code></td><td><code>float</code></td><td>F for float</td></tr>
+            <tr><td><code>Z</code></td><td><code>boolean</code></td><td>B was taken by byte; Z as in &ldquo;zero or one&rdquo;</td></tr>
+            <tr><td><code>B</code> / <code>S</code> / <code>C</code></td><td><code>byte</code> / <code>short</code> / <code>char</code></td><td>first letters</td></tr>
+            <tr><td><code>V</code></td><td><code>void</code></td><td>only legal as a return type</td></tr>
+            <tr><td><code>Ljava/lang/String;</code></td><td><code>String</code></td><td>L + slash-separated class name + semicolon</td></tr>
+            <tr><td><code>[I</code></td><td><code>int[]</code></td><td>one <code>[</code> per array dimension</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>So <code>add(int, int)</code> returning <code>int</code> is written <code>(II)I</code>. <code>greet(String)</code> returning <code>String</code> is <code>(Ljava/lang/String;)Ljava/lang/String;</code>. And <code>main(String[])</code> returning nothing is <code>([Ljava/lang/String;)V</code> — which you have now, finally, fully read. Note the dots in package names become slashes: inside a class file the separator is always <code>/</code>.</p>
+
+      <details class="check">
+        <summary>What Java method signature does <code>(IJ)Ljava/lang/String;</code> describe?</summary>
+        <div class="answer-body">A method taking an <code>int</code> and a <code>long</code>, in that order, and returning a <code>String</code>. In Java source: <code>String something(int a, long b)</code>. The method's <em>name</em> is not part of the descriptor — it is stored separately.</div>
+      </details>
+
+      <h3>3.6 Reading bytecode with <code>javap</code></h3>
+
+      <p>You do not have to decode bytes by hand to read bytecode. The <span class="term" tabindex="0" data-def="Java Development Kit: the JRE plus developer tools (javac, javap, jcmd…). This is what you install as a developer.">JDK</span> ships a tool for it, already installed on your machine since <a href="../chapter-00-setup/lesson-00-full-setup.html">Lesson 00</a>: <strong><code>javap</code></strong>, the Java class file disassembler. A <strong>disassembler</strong> is a program that reads compiled instructions and prints them back in their human-readable mnemonic form. It is the exact reverse of the compiler's last step — and note that it recovers <em>instructions</em>, not your source code: comments, blank lines, and your formatting are simply gone, because they were never in the file.</p>
+
+      <p>The flags worth knowing, all of which we use:</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Command</th><th>What it shows</th></tr></thead>
+          <tbody>
+            <tr><td><code>javap Foo.class</code></td><td>the public signatures only — the class's outward shape</td></tr>
+            <tr><td><code>javap -p Foo.class</code></td><td>the same, plus private members (<code>p</code> for private)</td></tr>
+            <tr><td><code>javap -c Foo.class</code></td><td>the bytecode of every method (<code>c</code> for code) — the main event</td></tr>
+            <tr><td><code>javap -v Foo.class</code></td><td>verbose: the version header, the whole constant pool, flags, everything</td></tr>
+            <tr><td><code>javap -l Foo.class</code></td><td>line numbers and local variable names, when the compiler recorded them</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>Reading the output takes ten seconds of orientation. Each method prints its signature, then a <code>Code:</code> block of lines shaped like this:</p>
+
+      <pre class="ascii"><code>   6: if_icmpgt     19
+   ^      ^           ^
+   |      |           |
+   |      |           +--- operand: where to jump to (a byte offset)
+   |      +--------------- mnemonic: which operation
+   +---------------------- the byte offset of this instruction inside the method</code></pre>
+
+      <p>That left-hand number is the single most misread thing in disassembly. It is <strong>not</strong> a line number and <strong>not</strong> a step count — it is the position of that instruction measured in bytes from the start of the method's code. That is why the numbers jump unevenly: <code>0, 1, 2, 3</code> means four one-byte instructions in a row, while a jump from <code>6</code> to <code>9</code> means the instruction at 6 occupied three bytes (one opcode plus a two-byte operand). It also explains how jumps work: <code>goto 4</code> means &ldquo;continue from byte offset 4,&rdquo; and offsets are stable regardless of how the code is printed.</p>
+
+      <h3>3.7 Four methods, disassembled</h3>
+
+      <p>Our project now contains <code>BytecodeSubject</code>, a class whose only purpose is to be taken apart. Here are its four methods with their predicted disassembly, each teaching one thing. (Section 6 lists the file in full; the exact commands to reproduce all of this are in Section 5.)</p>
+
+      <h4>(a) <code>add</code> — arguments, arithmetic, return</h4>
+
+      <pre class="code"><code><span class="kw">public static</span> <span class="ty">int</span> <span class="fn">add</span>(<span class="ty">int</span> a, <span class="ty">int</span> b) {
+    <span class="kw">return</span> a + b;
+}</code></pre>
+
+      <pre class="terminal"><code><span class="cmt">// PREDICTED javap -c output</span>
+  public static int add(int, int);
+    Code:
+       0: iload_0        <span class="cmt">// push slot 0 (a) onto the operand stack</span>
+       1: iload_1        <span class="cmt">// push slot 1 (b)</span>
+       2: iadd           <span class="cmt">// pop both, push their sum</span>
+       3: ireturn        <span class="cmt">// pop the top value and return it as an int</span></code></pre>
+
+      <p>Four instructions, four bytes, no surprises — this is the picture from Section 3.3 in text form. Notice what is <em>absent</em>: no mention of the names <code>a</code> and <code>b</code> in the instructions themselves, and no mention of the class or the method being called from. A method's bytecode is a self-contained little program over slots and a stack.</p>
+
+      <h4>(b) <code>sumTo</code> — where the <code>for</code> loop went</h4>
+
+      <pre class="code"><code><span class="kw">public static</span> <span class="ty">int</span> <span class="fn">sumTo</span>(<span class="ty">int</span> n) {
+    <span class="ty">int</span> total = <span class="num">0</span>;
+    <span class="kw">for</span> (<span class="ty">int</span> i = <span class="num">1</span>; i &lt;= n; i++) {
+        total += i;
+    }
+    <span class="kw">return</span> total;
+}</code></pre>
+
+      <pre class="terminal"><code><span class="cmt">// PREDICTED javap -c output</span>
+  public static int sumTo(int);
+    Code:
+       0: iconst_0       <span class="cmt">// push the constant 0</span>
+       1: istore_1       <span class="cmt">// pop it into slot 1  -> total = 0</span>
+       2: iconst_1       <span class="cmt">// push the constant 1</span>
+       3: istore_2       <span class="cmt">// pop it into slot 2  -> i = 1</span>
+       4: iload_2        <span class="cmt">// push i          &lt;-- top of the loop</span>
+       5: iload_0        <span class="cmt">// push n</span>
+       6: if_icmpgt  19  <span class="cmt">// pop both; if i &gt; n, continue from offset 19</span>
+       9: iload_1        <span class="cmt">// push total</span>
+      10: iload_2        <span class="cmt">// push i</span>
+      11: iadd           <span class="cmt">// pop both, push total + i</span>
+      12: istore_1       <span class="cmt">// pop into slot 1 -> total updated</span>
+      13: iinc       2, 1 <span class="cmt">// add 1 to slot 2 IN PLACE -> i++ (stack untouched)</span>
+      16: goto       4   <span class="cmt">// jump back to the top of the loop</span>
+      19: iload_1        <span class="cmt">// push total</span>
+      20: ireturn        <span class="cmt">// return it</span></code></pre>
+
+      <p>There is no <code>for</code> instruction, because the JVM has no concept of a loop. A loop is a <strong>conditional jump forward</strong> (escape when the test fails) plus an <strong>unconditional jump backward</strong> (repeat). Every <code>while</code>, <code>for</code>, <code>do-while</code> and enhanced-for in Java compiles into some arrangement of exactly those two moves. Three details reward a second look:</p>
+
+      <ul>
+        <li><strong>The test is inverted.</strong> You wrote &ldquo;keep going while <code>i &lt;= n</code>&rdquo;; the bytecode says &ldquo;jump out if <code>i &gt; n</code>.&rdquo; A jump needs a condition under which it fires, and the useful one is the exit condition, so the compiler flips your test.</li>
+        <li><strong><code>iinc</code> is special.</strong> Incrementing a local variable is so common that the format gives it a dedicated instruction that modifies a slot <em>in place</em> — no push, no pop. It takes two operands: which slot, and by how much. This is why <code>i++</code> as a statement costs one instruction while <code>total += i</code> costs four.</li>
+        <li><strong>The offsets prove the widths.</strong> <code>6</code> to <code>9</code> and <code>13</code> to <code>16</code> are gaps of three: <code>if_icmpgt</code> and <code>iinc</code> and <code>goto</code> each carry two operand bytes. Everything else here is a single byte. You can literally count the size of a method by reading its last offset.</li>
+      </ul>
+
+      <h4>(c) <code>greet</code> — when bytecode looks nothing like the source</h4>
+
+      <pre class="code"><code><span class="kw">public static</span> <span class="ty">String</span> <span class="fn">greet</span>(<span class="ty">String</span> name) {
+    <span class="kw">return</span> <span class="str">"Hello, "</span> + name;
+}</code></pre>
+
+      <pre class="terminal"><code><span class="cmt">// PREDICTED javap -c output (the # numbers will differ on your machine)</span>
+  public static java.lang.String greet(java.lang.String);
+    Code:
+       0: aload_0            <span class="cmt">// push slot 0 (name) - 'a' because it is a reference</span>
+       1: invokedynamic #7,  0  <span class="cmt">// InvokeDynamic #0:makeConcatWithConstants:</span>
+                                 <span class="cmt">//   (Ljava/lang/String;)Ljava/lang/String;</span>
+       6: areturn            <span class="cmt">// return the reference on top of the stack</span></code></pre>
+
+      <p>One <code>+</code> in your source became one instruction you have never heard of, and the words &ldquo;Hello, &rdquo; are nowhere in sight. Here is what happened, plainly. Since Java 9, the compiler does not decide <em>how</em> to join strings. Instead it emits a single instruction meaning: <em>the first time this line runs, call a helper in the JDK, hand it a description of this exact concatenation, and let the helper build a fast routine on the spot; then use that routine here forever after.</em> The instruction that does this &mdash; &ldquo;work out what to call the first time, then remember the answer&rdquo; &mdash; is <code>invokedynamic</code>, and the helper here is named <code>makeConcatWithConstants</code>. The literal <code>"Hello, "</code> is part of the description handed to the helper (that is the &ldquo;WithConstants&rdquo; part), which is why only <code>name</code> has to be pushed at run time.</p>
+
+      <p>Why go to that trouble? Because it lets the JDK change its string-joining strategy — and get faster — without recompiling a single line of anyone's code. The decision moved out of the compiler and into the runtime. Keep the name <code>invokedynamic</code> in mind: it is also how <em>lambda expressions</em> are compiled, which we will meet again in Section 7.</p>
+
+      <div class="callout warning">
+        <p>This is the single best cure for guessing about performance from source alone. Your one-character <code>+</code> is a call into a machine-generated routine; a <code>for</code> loop is a pair of jumps; a field access may be free or may not exist at all by the time the JIT is finished. <strong>Source lines and work done are different things.</strong> Measure, or read the bytecode — do not intuit.</p>
+      </div>
+
+      <h4>(d) <code>newObject</code> — the shape of every <code>new</code> in Java</h4>
+
+      <pre class="code"><code><span class="kw">public static</span> <span class="ty">Object</span> <span class="fn">newObject</span>() {
+    <span class="kw">return</span> <span class="kw">new</span> <span class="ty">Object</span>();
+}</code></pre>
+
+      <pre class="terminal"><code><span class="cmt">// PREDICTED javap -c output (the # numbers will differ on your machine)</span>
+  public static java.lang.Object newObject();
+    Code:
+       0: new           #11   <span class="cmt">// class java/lang/Object - allocate blank memory, push a reference</span>
+       3: dup                 <span class="cmt">// duplicate that reference, so there are now two on the stack</span>
+       4: invokespecial #1    <span class="cmt">// Method java/lang/Object."&lt;init&gt;":()V - run the constructor,</span>
+                              <span class="cmt">//   which consumes one of the two references</span>
+       7: areturn             <span class="cmt">// return the surviving reference</span></code></pre>
+
+      <p>This tiny sequence answers a question most Java developers never think to ask: what <em>is</em> <code>new</code>? It is two separate things that your source fuses into one word. First, <code>new</code> reserves the memory for a blank object of that class in the <span class="term" tabindex="0" data-def="The JVM's big memory pool where every object created with new lives; explored fully in Lesson 03.">heap</span> and pushes a <em>reference</em> to it (a reference is just a value identifying where the object lives — Lesson 03 is entirely about this). Second, <code>invokespecial</code> runs the constructor on that blank object, to fill in its fields. The constructor call consumes the reference from the stack, which is why <code>dup</code> is needed in between: without a duplicate, the reference would be swallowed by the constructor and there would be nothing left to return or assign.</p>
+
+      <p>Two more facts fall out of this. A constructor is stored in the class file as an ordinary method with the reserved name <code>&lt;init&gt;</code> and return type <code>V</code> (void) — which is why the disassembly mentions <code>"&lt;init&gt;":()V</code>, and why <code>javap -p</code> on our class shows a <code>Code:</code> block for the private constructor too. And the four call instructions are worth naming now, since you will see them constantly: <code>invokestatic</code> (a static method), <code>invokevirtual</code> (an ordinary method, where the actual implementation depends on the object's real class), <code>invokespecial</code> (constructors, <code>super.</code> calls, and private methods — cases where no such lookup is wanted), and <code>invokeinterface</code> (a call through an interface type).</p>
+
+      <h3>3.8 Step through it yourself</h3>
+
+      <p>Prose can describe a stack; watching one move is better. The simulation below walks either program instruction by instruction, showing the local slots and the operand stack after each step. Everything it shows has already been explained above — if you are reading with JavaScript disabled, you have missed nothing.</p>
+
+      <div class="sim">
+        <div class="sim-controls">
+          <div class="sim-group">
+            <span>Program</span>
+            <div>
+              <button type="button" class="sim-btn active" id="sim1-prog-add">add(7, 5)</button>
+              <button type="button" class="sim-btn" id="sim1-prog-sum">sumTo(4)</button>
+            </div>
+          </div>
+          <div class="sim-group">
+            <span>Run</span>
+            <div>
+              <button type="button" class="sim-btn action" id="sim1-step">Step ▶</button>
+              <button type="button" class="sim-btn" id="sim1-all">Run to end ⏭</button>
+              <button type="button" class="sim-btn" id="sim1-reset">Reset ↺</button>
+            </div>
+          </div>
+        </div>
+        <div class="sim-console" id="sim1-out" aria-live="polite">Press <strong>Step</strong> to execute the first instruction.</div>
+        <p class="sim-note">This is a <strong>model</strong> of the JVM's operand stack, not the real thing — it implements eight instructions and nothing else (no exceptions, no types other than int, no method calls). The real authority is <code>javap -c -p target/classes/com/corejava/jvm/BytecodeSubject.class</code> on your own machine, and the real values are what <code>mvn test</code> asserts. If the two ever disagree, the machine is right.</p>
+      </div>
+
+      <script>
+      (function () {
+        // ---- the two hand-encoded programs -------------------------------------
+        var PROGRAMS = {
+          add: {
+            title: 'add(7, 5)',
+            names: ['a', 'b'],
+            locals: [7, 5],
+            code: [
+              { off: 0, txt: 'iload_0', op: 'iload', arg: 0 },
+              { off: 1, txt: 'iload_1', op: 'iload', arg: 1 },
+              { off: 2, txt: 'iadd', op: 'iadd' },
+              { off: 3, txt: 'ireturn', op: 'ireturn' }
+            ]
+          },
+          sum: {
+            title: 'sumTo(4)',
+            names: ['n', 'total', 'i'],
+            locals: [4, null, null],
+            code: [
+              { off: 0, txt: 'iconst_0', op: 'iconst', arg: 0 },
+              { off: 1, txt: 'istore_1', op: 'istore', arg: 1 },
+              { off: 2, txt: 'iconst_1', op: 'iconst', arg: 1 },
+              { off: 3, txt: 'istore_2', op: 'istore', arg: 2 },
+              { off: 4, txt: 'iload_2', op: 'iload', arg: 2 },
+              { off: 5, txt: 'iload_0', op: 'iload', arg: 0 },
+              { off: 6, txt: 'if_icmpgt 19', op: 'if_icmpgt', target: 19 },
+              { off: 9, txt: 'iload_1', op: 'iload', arg: 1 },
+              { off: 10, txt: 'iload_2', op: 'iload', arg: 2 },
+              { off: 11, txt: 'iadd', op: 'iadd' },
+              { off: 12, txt: 'istore_1', op: 'istore', arg: 1 },
+              { off: 13, txt: 'iinc 2, 1', op: 'iinc', arg: 2, by: 1 },
+              { off: 16, txt: 'goto 4', op: 'goto', target: 4 },
+              { off: 19, txt: 'iload_1', op: 'iload', arg: 1 },
+              { off: 20, txt: 'ireturn', op: 'ireturn' }
+            ]
+          }
+        };
+
+        // ---- a tiny interpreter that produces the whole trace up front ---------
+        function buildTrace(p) {
+          var locals = p.locals.slice();
+          var stack = [];
+          var byOffset = {};
+          for (var k = 0; k < p.code.length; k++) { byOffset[p.code[k].off] = k; }
+
+          var steps = [], pc = 0, guard = 0, finished = false, returned = null;
+
+          while (!finished && guard++ < 400) {
+            var ins = p.code[pc];
+            var next = pc + 1;
+            var note = '', a, b, v;
+
+            if (ins.op === 'iconst') {
+              stack.push(ins.arg);
+              note = 'push the constant ' + ins.arg;
+            } else if (ins.op === 'iload') {
+              stack.push(locals[ins.arg]);
+              note = 'push slot ' + ins.arg + ' (' + p.names[ins.arg] + ' = ' + locals[ins.arg] + ')';
+            } else if (ins.op === 'istore') {
+              v = stack.pop();
+              locals[ins.arg] = v;
+              note = 'pop ' + v + ' into slot ' + ins.arg + ' (' + p.names[ins.arg] + ')';
+            } else if (ins.op === 'iadd') {
+              b = stack.pop(); a = stack.pop(); stack.push(a + b);
+              note = 'pop ' + b + ' and ' + a + ', push ' + (a + b);
+            } else if (ins.op === 'iinc') {
+              locals[ins.arg] = locals[ins.arg] + ins.by;
+              note = 'add ' + ins.by + ' to slot ' + ins.arg + ' in place (' + p.names[ins.arg]
+                   + ' is now ' + locals[ins.arg] + ') — the stack is not touched';
+            } else if (ins.op === 'if_icmpgt') {
+              b = stack.pop(); a = stack.pop();
+              if (a > b) { next = byOffset[ins.target]; note = a + ' &gt; ' + b + ' is TRUE — jump out to offset ' + ins.target; }
+              else { note = a + ' &gt; ' + b + ' is false — fall through, run the loop body'; }
+            } else if (ins.op === 'goto') {
+              next = byOffset[ins.target];
+              note = 'jump back to offset ' + ins.target + ' — this is what makes it a loop';
+            } else if (ins.op === 'ireturn') {
+              returned = stack.pop();
+              note = 'pop ' + returned + ' and hand it back to the caller';
+              finished = true;
+            }
+
+            steps.push({
+              off: ins.off, txt: ins.txt, note: note,
+              locals: locals.slice(), stack: stack.slice(),
+              done: finished, result: returned
+            });
+            pc = next;
+          }
+          return steps;
+        }
+
+        // ---- state -------------------------------------------------------------
+        var current = 'add';
+        var steps = buildTrace(PROGRAMS.add);
+        var at = 0;
+
+        var out = document.getElementById('sim1-out');
+        var btnAdd = document.getElementById('sim1-prog-add');
+        var btnSum = document.getElementById('sim1-prog-sum');
+        var btnStep = document.getElementById('sim1-step');
+        var btnAll = document.getElementById('sim1-all');
+        var btnReset = document.getElementById('sim1-reset');
+
+        function pad(s, n) { s = String(s); while (s.length < n) { s = ' ' + s; } return s; }
+
+        function showLocals(p, locals) {
+          var parts = [];
+          for (var i = 0; i < locals.length; i++) {
+            parts.push(p.names[i] + '=' + (locals[i] === null ? '—' : locals[i]));
+          }
+          return parts.join('   ');
+        }
+
+        function showStack(stack) {
+          if (stack.length === 0) { return '<span class="skip">(empty)</span>'; }
+          return '[ ' + stack.join('  ') + ' ]   <span class="skip">← top of stack on the right</span>';
+        }
+
+        function render() {
+          var p = PROGRAMS[current];
+          if (at === 0) {
+            out.innerHTML = '<span class="hi">' + p.title + '</span>  —  not started\n\n'
+              + 'locals  ' + showLocals(p, p.locals) + '\n'
+              + 'stack   <span class="skip">(empty)</span>\n\n'
+              + 'Press <strong>Step</strong> to execute instruction 0.';
+            return;
+          }
+          var s = steps[at - 1];
+          var from = Math.max(0, at - 6);
+          var log = '';
+          for (var i = from; i < at; i++) {
+            var st = steps[i];
+            var mark = (i === at - 1) ? '<span class="hi">' : '<span class="skip">';
+            log += mark + pad(st.off, 4) + ': ' + (st.txt + '            ').slice(0, 14) + '</span> '
+                 + (i === at - 1 ? st.note : '') + '\n';
+          }
+          if (from > 0) { log = '   …\n' + log; }
+
+          out.innerHTML = '<span class="hi">' + p.title + '</span>  —  step ' + at + ' of ' + steps.length + '\n\n'
+            + log + '\n'
+            + 'locals  ' + showLocals(p, s.locals) + '\n'
+            + 'stack   ' + showStack(s.stack) + '\n'
+            + (s.done ? '\n<span class="ok">returned ' + s.result + '  ·  method finished, stack empty</span>' : '');
+        }
+
+        function select(which) {
+          current = which;
+          steps = buildTrace(PROGRAMS[which]);
+          at = 0;
+          btnAdd.className = 'sim-btn' + (which === 'add' ? ' active' : '');
+          btnSum.className = 'sim-btn' + (which === 'sum' ? ' active' : '');
+          render();
+        }
+
+        btnAdd.onclick = function () { select('add'); };
+        btnSum.onclick = function () { select('sum'); };
+        btnStep.onclick = function () { if (at < steps.length) { at++; render(); } };
+        btnAll.onclick = function () { at = steps.length; render(); };
+        btnReset.onclick = function () { at = 0; render(); };
+
+        render();
+      })();
+      </script>
+
+      <p>Stepping through <code>sumTo(4)</code> makes one thing obvious that the printed disassembly hides: the operand stack is <em>empty</em> at the top of every loop iteration, and empty again after every store. It fills up for a moment during a calculation and immediately drains. That is the normal rhythm of bytecode — brief flurries of pushing and popping between stable values parked in local slots.</p>
+
+      <h3>3.9 Two ways to run the same instructions</h3>
+
+      <p>We now know what the JVM is handed. How does it actually execute it? The obvious answer is a loop: fetch the next instruction, look at its opcode, do the corresponding thing, move on. Carrying out instructions one at a time like this, without translating them first, is called <strong>interpreting</strong>, and the part of the JVM that does it is the <strong>interpreter</strong>.</p>
+
+      <p>Interpreting has one enormous advantage: it starts instantly. There is no preparation, no translation step, no waiting — the first instruction runs immediately. Its disadvantage is equally clear: for every one of your instructions the JVM does a pile of its own work — read the opcode, decide what it means, jump to the right handler, adjust the stack pointer. A single <code>iadd</code> costs far more than the CPU's own add. Roughly speaking, interpreted code runs on the order of ten to a hundred times slower than native code — the exact factor depends on everything, so treat that as a shape, not a measurement.</p>
+
+      <p>The other option is to translate a method's bytecode into real machine code for the chip you are on, once, and then run the translated version at full native speed. This costs time up front — the translation itself is work, and good translation is expensive work — but it pays that cost back on every subsequent call.</p>
+
+      <p>So which does the JVM choose? <strong>Both, at the same time.</strong> It starts by interpreting, so your program is running within milliseconds. Meanwhile it counts things: how many times each method has been called, how many times each loop has gone around. When a method's counters cross a threshold — when it looks, on the evidence, worth the investment — the JVM hands that method to a compiler running on a <em>background thread</em>, which produces native code while your program keeps going. Once the native version is ready, subsequent calls quietly use it instead. Compiling <em>during</em> execution like this, rather than ahead of time, is called <strong>just-in-time compilation</strong>, universally shortened to <strong>JIT</strong>. A method that has been called often enough to earn compilation is called <strong>hot</strong> — and now the name <span class="term" tabindex="0" data-def="The name of the JVM implementation inside standard JDK builds; when this course says 'the JVM does X' it means HotSpot.">HotSpot</span>, the JVM you are running, finally makes sense: it finds the hot spots in your program and compiles those.</p>
+
+      <figure class="fig">
+        <svg viewBox="0 0 720 216" role="img" aria-label="Bytecode feeds two paths at once. The upper path goes to the interpreter, which runs immediately but slowly. The lower path counts how often code runs, then hands hot methods to the C1 and C2 compilers, which produce native machine code that runs much faster.">
+          <defs>
+            <marker id="l1jh" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path class="fig-arrow-h" d="M0,0 L10,5 L0,10 z"/>
+            </marker>
+            <marker id="l1ja" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path class="fig-arrow-accent-h" d="M0,0 L10,5 L0,10 z"/>
+            </marker>
+          </defs>
+
+          <rect class="fig-code" x="10" y="76" width="110" height="60" rx="10"/>
+          <text class="fig-label" x="65" y="100" text-anchor="middle">bytecode</text>
+          <text class="fig-small" x="65" y="118" text-anchor="middle">your method</text>
+
+          <path class="fig-arrow" d="M122,96 L166,54" marker-end="url(#l1jh)"/>
+          <path class="fig-arrow-accent" d="M122,116 L166,140" marker-end="url(#l1ja)"/>
+
+          <rect class="fig-infra" x="170" y="24" width="170" height="56" rx="10"/>
+          <text class="fig-label" x="255" y="48" text-anchor="middle">interpreter</text>
+          <text class="fig-small" x="255" y="66" text-anchor="middle">one instruction at a time</text>
+
+          <path class="fig-arrow" d="M342,52 L376,52" marker-end="url(#l1jh)"/>
+          <rect class="fig-generic" x="380" y="24" width="180" height="56" rx="10"/>
+          <text class="fig-small" x="470" y="46" text-anchor="middle">runs at once — slowly</text>
+          <text class="fig-small" x="470" y="64" text-anchor="middle">no waiting, no warm-up</text>
+
+          <rect class="fig-infra" x="170" y="112" width="170" height="56" rx="10"/>
+          <text class="fig-label" x="255" y="136" text-anchor="middle">counters + profiling</text>
+          <text class="fig-small" x="255" y="154" text-anchor="middle">is this method hot?</text>
+
+          <path class="fig-arrow-accent" d="M342,140 L376,140" marker-end="url(#l1ja)"/>
+          <rect class="fig-infra" x="380" y="112" width="76" height="56" rx="10"/>
+          <text class="fig-label" x="418" y="136" text-anchor="middle">C1</text>
+          <text class="fig-small" x="418" y="154" text-anchor="middle">fast compile</text>
+
+          <path class="fig-arrow-accent" d="M458,140 L484,140" marker-end="url(#l1ja)"/>
+          <rect class="fig-infra" x="488" y="112" width="76" height="56" rx="10"/>
+          <text class="fig-label" x="526" y="136" text-anchor="middle">C2</text>
+          <text class="fig-small" x="526" y="154" text-anchor="middle">deep optimise</text>
+
+          <path class="fig-arrow-accent" d="M566,140 L592,140" marker-end="url(#l1ja)"/>
+          <rect class="fig-generic" x="596" y="112" width="114" height="56" rx="10"/>
+          <text class="fig-small" x="653" y="134" text-anchor="middle">native code</text>
+          <text class="fig-small" x="653" y="152" text-anchor="middle">full chip speed</text>
+
+          <text class="fig-small" x="360" y="198" text-anchor="middle">Both paths are live at once: the lower path compiles on a background thread while the upper path keeps your program running.</text>
+        </svg>
+        <figcaption><strong>Two execution modes, running together.</strong> Amber = your compiled method; teal = machinery inside the JVM; grey = the outcome you actually experience. The upper path is why Java starts fast; the lower path is why it ends up fast.</figcaption>
+      </figure>
+
+      <p>The two compilers in that picture are real and both ship inside HotSpot. <strong>C1</strong> compiles quickly and optimises lightly, so warm code gets faster soon. <strong>C2</strong> compiles slowly and optimises aggressively, so the hottest code eventually gets very fast indeed. HotSpot uses both — interpreter first, then C1, then C2 for the true hot spots — and the arrangement is called <strong>tiered compilation</strong>. The period at the start of a program during which this is still settling out is called <strong>warm-up</strong>, and it is why the first run of a loop can be twenty times slower than the tenth. Lesson 06 takes all of this apart properly (including how the JIT can <em>undo</em> a compilation when an assumption it made turns out to be wrong); for now the shape is enough, and our experiment in Section 6 makes it visible on your machine.</p>
+
+      <div class="callout realworld">
+        <p>This is why Java has a reputation for being &ldquo;slow to start but fast once running,&rdquo; and why that reputation causes real architectural decisions. A long-lived server process warms up in the first seconds and then runs at native speed for weeks — Java's ideal case. A command-line tool that runs for 200 milliseconds and exits never gets past the interpreter, which is why some Java CLI tools feel sluggish next to equivalents written in Go or Rust. It is also why benchmark numbers posted without a warm-up phase are worthless, and why interviewers like asking why the first iteration of a loop is slow.</p>
+      </div>
+
+      <details class="check">
+        <summary>Why does the JVM interpret at all, instead of just compiling everything to native code up front?</summary>
+        <div class="answer-body">Because compiling costs time, and most code is not worth it. A typical program spends nearly all its time in a small fraction of its methods; compiling every method eagerly would delay startup for code that may run once or never. Interpreting starts instantly and costs nothing up front, and counting lets the JVM spend its compilation budget only where it pays back. The bonus is that by the time it compiles, it has <em>watched</em> the code run and can optimise using facts about this particular execution — something an ahead-of-time compiler never knows.</div>
+      </details>
+
+      <h3>3.10 Where &ldquo;run anywhere&rdquo; leaks</h3>
+
+      <p>Depth means honesty about limits, so: portability is real but not absolute. The bytecode is identical everywhere and the JVM guarantees the <em>semantics</em> — the same arithmetic, the same object model, the same threading rules. What leaks is everything around the edges. Code that shells out to native libraries specific to one operating system is not portable. Neither is code that hard-codes <code>C:\</code> or assumes <code>/</code> as a path separator, or assumes a particular default character encoding, or relies on file names being case-insensitive. Thread scheduling and timing differ between operating systems, so a program with a latent race condition can pass on one machine for years and fail on another. And a class file compiled for Java 21 cannot run on Java 17 — portability across <em>machines</em> was never portability across <em>versions</em>. &ldquo;Write once, run anywhere&rdquo; is a statement about the compiled artifact, not a promise that you cannot write machine-specific bugs.</p>
+    </section>
+
+    <!-- ===================== SECTION 4 — WRONG WAY ===================== -->
+    <section id="s4">
+      <h2><span class="sec-num">4</span> The wrong way</h2>
+
+      <p><strong>WRONG APPROACH — three ways people try to look inside a class file and end up with a wrong belief.</strong> Each of these is a real mistake with a real symptom.</p>
+
+      <h3>Mistake 1: opening a class file as text</h3>
+
+      <p>The file has an ordinary-looking name, so the obvious move is to print it:</p>
+
+      <pre class="terminal"><code>D:\...\jvm-explorer&gt; type target\classes\com\corejava\jvm\BytecodeSubject.class
+
+<span class="cmt">// PREDICTED: something like this, varying wildly by terminal and code page</span>
+Ê¾..A...Z..
+..java/lang/Object..&lt;init&gt;...()V...add...(II)I...sumTo...Code
+LineNumberTable...BytecodeSubject.java...</code></pre>
+
+      <p>The conclusion people draw is &ldquo;it is compiled, so it is unreadable.&rdquo; Both halves are wrong. Readable fragments <em>are</em> visible in that mess — <code>java/lang/Object</code>, <code>&lt;init&gt;</code>, <code>(II)I</code>, method names — because the constant pool stores names as text. What is unreadable is everything else, and only because a text viewer is the wrong instrument: it takes each byte, guesses it is a character, and prints the guess. The bytes are fine; the interpretation is nonsense. Worse, <code>type</code> and <code>cat</code> can also mangle your terminal (some byte values are control codes), which cements the impression that the file is hostile.</p>
+
+      <h3>Mistake 2: decoding the header without masking the sign bit</h3>
+
+      <p>The more serious mistake is made by people who <em>do</em> know the format. You read the first four bytes and compare them to <code>0xCAFEBABE</code>:</p>
+
+      <pre class="code"><code><span class="cmt">// WRONG: looks right, is wrong, and the failure accuses the innocent file</span>
+<span class="ty">byte</span>[] header = in.<span class="fn">readNBytes</span>(<span class="num">8</span>);
+
+<span class="cmt">// The bug is on this line: no masking.</span>
+<span class="ty">int</span> magic = (header[<span class="num">0</span>] &lt;&lt; <span class="num">24</span>)
+          | (header[<span class="num">1</span>] &lt;&lt; <span class="num">16</span>)
+          | (header[<span class="num">2</span>] &lt;&lt; <span class="num">8</span>)
+          |  header[<span class="num">3</span>];
+
+System.out.<span class="fn">println</span>(String.<span class="fn">format</span>(<span class="str">"0x%08X"</span>, magic));</code></pre>
+
+      <pre class="terminal"><code><span class="cmt">// PREDICTED output of the wrong version:</span>
+<span class="out">0xFFFFFFBE</span>
+<span class="cmt">// ...against an expected 0xCAFEBABE. Conclusion drawn: "my file is corrupt."</span></code></pre>
+
+      <p>The file is perfect. The bug is that <strong>a Java <code>byte</code> is signed</strong>: it holds −128 to 127, not 0 to 255. The byte <code>0xCA</code> therefore arrives as the number −54. When Java uses a <code>byte</code> in arithmetic it first widens it to an <code>int</code>, and widening a negative number fills the new high bits with ones — so −54 becomes <code>0xFFFFFFCA</code>, not <code>0x000000CA</code>. Those stray ones then flood every position of the OR, and the four values collapse into <code>0xFFFFFFBE</code>.</p>
+
+      <p>The fix is one operation per byte: <code>&amp; 0xFF</code>, which keeps the same eight bits but re-reads them as 0 to 255. There is a second, quieter trap hiding behind the first: even correctly assembled, <code>0xCAFEBABE</code> does not fit in a positive <code>int</code> (an <code>int</code> stops at about 2.1 billion; that value is about 3.4 billion), so storing it in an <code>int</code> makes it appear negative and every comparison misbehaves. The magic number has to be held in a <code>long</code>. Section 5 does both.</p>
+
+      <h3>Mistake 3: reasoning about cost from the shape of the source</h3>
+
+      <p>The most common wrong approach needs no code at all — it is the habit of predicting work from how source code looks:</p>
+
+      <ul>
+        <li>&ldquo;<code>i++</code> and <code>total += i</code> are both one line, so they cost the same.&rdquo; In bytecode, <code>i++</code> as a statement is a single <code>iinc</code>; <code>total += i</code> is four instructions.</li>
+        <li>&ldquo;<code>"Hello, " + name</code> is one <code>+</code>, so it is trivial.&rdquo; It is an <code>invokedynamic</code> into a JDK helper that builds and caches a routine on first use.</li>
+        <li>&ldquo;This loop looks tight, so it must be fast.&rdquo; Until it has run enough times to be compiled, every instruction in it is being interpreted — and after C2 gets hold of it, the loop you are reading may not exist in the native code at all.</li>
+      </ul>
+
+      <div class="callout warning">
+        <p><strong>Predicted symptoms of all three mistakes:</strong> confident statements that cannot be checked; a &ldquo;corrupt file&rdquo; bug report against a file that is fine; performance work aimed at the wrong line; and — the expensive one — an <code>UnsupportedClassVersionError</code> in production that nobody can decode, because nobody knows the version is sitting in bytes 6 and 7 of every file being shipped.</p>
+      </div>
+    </section>
+
+    <!-- ===================== SECTION 5 — RIGHT WAY ===================== -->
+    <section id="s5">
+      <h2><span class="sec-num">5</span> The right way</h2>
+
+      <p><strong>CORRECT APPROACH:</strong> read the header with code that respects the format, and read the instructions with the tool built for it. Two habits, both cheap.</p>
+
+      <h3>5.1 Decode the header yourself</h3>
+
+      <p>The project gains a small module — <code>ClassFileInspector</code> — that finds a class's own <code>.class</code> file and decodes its first eight bytes. The heart of it is this pair of helpers; the full file with every line commented is in Section 6.</p>
+
+      <pre class="code"><code><span class="cmt">// CORRECT: mask every byte, and hold the four-byte value in a long.</span>
+<span class="kw">private static</span> <span class="ty">long</span> <span class="fn">readUnsignedInt</span>(<span class="ty">byte</span>[] bytes, <span class="ty">int</span> offset) {
+    <span class="kw">return</span> ((<span class="ty">long</span>) (bytes[offset]     &amp; <span class="num">0xFF</span>) &lt;&lt; <span class="num">24</span>)   <span class="cmt">// re-read the bits as 0..255,</span>
+         | ((<span class="ty">long</span>) (bytes[offset + <span class="num">1</span>] &amp; <span class="num">0xFF</span>) &lt;&lt; <span class="num">16</span>)   <span class="cmt">// then slide each byte into</span>
+         | ((<span class="ty">long</span>) (bytes[offset + <span class="num">2</span>] &amp; <span class="num">0xFF</span>) &lt;&lt;  <span class="num">8</span>)   <span class="cmt">// its place, most significant</span>
+         |  (<span class="ty">long</span>) (bytes[offset + <span class="num">3</span>] &amp; <span class="num">0xFF</span>);          <span class="cmt">// byte first (big-endian).</span>
+}
+
+<span class="kw">private static</span> <span class="ty">int</span> <span class="fn">readUnsignedShort</span>(<span class="ty">byte</span>[] bytes, <span class="ty">int</span> offset) {
+    <span class="kw">return</span> ((bytes[offset] &amp; <span class="num">0xFF</span>) &lt;&lt; <span class="num">8</span>)                 <span class="cmt">// two bytes, same rule;</span>
+         |  (bytes[offset + <span class="num">1</span>] &amp; <span class="num">0xFF</span>);                  <span class="cmt">// 0..65535 fits in an int.</span>
+}</code></pre>
+
+      <p>One design decision in that module is worth pausing on, because it is the difference between code that works and code that keeps working. To find the bytes, we do <em>not</em> open <code>target/classes/com/corejava/jvm/BytecodeSubject.class</code> as a file path. We ask the JVM for them:</p>
+
+      <pre class="code"><code><span class="cmt">// Rebuild the class's location the way the class path stores it:</span>
+<span class="cmt">// com.corejava.jvm.BytecodeSubject  ->  /com/corejava/jvm/BytecodeSubject.class</span>
+<span class="ty">String</span> resourcePath = <span class="str">"/"</span> + type.<span class="fn">getName</span>().<span class="fn">replace</span>(<span class="str">'.'</span>, <span class="str">'/'</span>) + <span class="str">".class"</span>;
+
+<span class="cmt">// Ask the same machinery that LOADED this class for its raw bytes.</span>
+<span class="kw">try</span> (<span class="ty">InputStream</span> in = ClassFileInspector.<span class="kw">class</span>.<span class="fn">getResourceAsStream</span>(resourcePath)) { <span class="cmt">/* … */</span> }</code></pre>
+
+      <p>A hard-coded path assumes the class lives in a folder on this machine right now. The resource lookup asks whichever loader supplied the class to supply its bytes as well, so the same code works when the project is a folder, when it is packaged into a jar, and inside the test run — where the working directory is not what you would guess. It also quietly foreshadows the whole of Lesson 02: <em>something</em> located and loaded that file, and that something is a class loader.</p>
+
+      <h3>5.2 What happens, step by step, when the inspector runs</h3>
+
+      <ol>
+        <li>A caller passes a <code>Class</code> object, for example <code>BytecodeSubject.class</code>. A null is rejected immediately with a message naming the mistake.</li>
+        <li>The fully-qualified name <code>com.corejava.jvm.BytecodeSubject</code> has its dots replaced by slashes and gains a leading slash and a <code>.class</code> suffix, producing the class path location <code>/com/corejava/jvm/BytecodeSubject.class</code>.</li>
+        <li><code>getResourceAsStream</code> hands back an open stream of that file's bytes — or <code>null</code>, which we turn into a clear <code>IllegalStateException</code> rather than a mystery <code>NullPointerException</code> two lines later.</li>
+        <li><code>readNBytes(8)</code> pulls exactly the eight header bytes. If fewer arrive, the file cannot be a class file and we say so with the actual length in the message.</li>
+        <li>Bytes 0–3 are assembled into a <code>long</code> with masking: <code>0xCAFEBABE</code>. Bytes 4–5 become the minor version: <code>0</code>. Bytes 6–7 become the major version: <code>65</code>.</li>
+        <li>The four values are packaged into an immutable <code>ClassFileHeader</code>, which knows how to say <code>0xCAFEBABE</code> in hex, how to turn 65 into &ldquo;Java 21&rdquo; (subtract 44), and whether the minor version is the preview flag 65535.</li>
+        <li>The stream is closed automatically by try-with-resources, whether we returned normally or threw.</li>
+      </ol>
+
+      <div class="callout note">
+        <p><strong>Predicted output</strong> of the new lines at the end of <code>JvmExplorer</code> (run in Section 6):</p>
+      </div>
+      <pre class="terminal"><code>--- class file headers: what javac actually produced ---
+<span class="out">com.corejava.jvm.BytecodeSubject  magic=0xCAFEBABE  major=65 (Java 21)  minor=0</span>
+<span class="out">com.corejava.jvm.JvmExplorer  magic=0xCAFEBABE  major=65 (Java 21)  minor=0</span>
+Class files say : Java 21 (major 65)
+Running JVM is  : Java 21</code></pre>
+
+      <h3>5.3 Read the instructions with <code>javap</code></h3>
+
+      <p>Compile first — <code>javap</code> reads compiled files, so there must be some — then disassemble:</p>
+
+      <pre class="terminal"><code><span class="cmt"># from inside jvm-explorer/</span>
+mvn compile
+
+<span class="cmt"># the bytecode of every method, including the private constructor</span>
+javap -c -p target/classes/com/corejava/jvm/BytecodeSubject.class
+
+<span class="cmt"># the same thing addressed by class name instead of file path</span>
+javap -c -p -cp target/classes com.corejava.jvm.BytecodeSubject
+
+<span class="cmt"># the verbose view: version header, constant pool, flags, everything</span>
+javap -v target/classes/com/corejava/jvm/BytecodeSubject.class</code></pre>
+
+      <p>The head of the verbose output is the same eight bytes our own code just decoded, printed by a tool that has been in the JDK for decades:</p>
+
+      <pre class="terminal"><code><span class="cmt">// PREDICTED head of javap -v (paths, sizes and checksums will differ)</span>
+Classfile /D:/.../jvm-explorer/target/classes/com/corejava/jvm/BytecodeSubject.class
+  Last modified ...; size ... bytes
+  SHA-256 checksum ...
+  Compiled from "BytecodeSubject.java"
+public final class com.corejava.jvm.BytecodeSubject
+<span class="out">  minor version: 0</span>
+<span class="out">  major version: 65</span>
+  flags: (0x0031) ACC_PUBLIC, ACC_FINAL, ACC_SUPER
+  this_class: #..                         // com/corejava/jvm/BytecodeSubject
+  super_class: #..                        // java/lang/Object
+  interfaces: 0, fields: 0, methods: 5, attributes: 1</code></pre>
+
+      <p><code>methods: 5</code> is a nice detail to check: four public methods plus the private constructor. And <code>ACC_PUBLIC, ACC_FINAL</code> is the <code>public final</code> from our source, stored as bits in the access-flags field of the file.</p>
+
+      <div class="callout tryit">
+        <p>Run all four commands above from <code>jvm-explorer/</code> and compare against the predictions in Section 3.7 and here. Expect the <code>#</code> constant-pool numbers, the file path, the size and the checksum to differ — those are machine-specific. The <strong>instructions and their offsets should match exactly</strong>. If they do not, your machine is right and my prediction is wrong: tell me what you saw and we will work out why.</p>
+      </div>
+    </section>
+
+    <!-- ===================== SECTION 6 — APPLIED ===================== -->
+    <section id="s6">
+      <h2><span class="sec-num">6</span> Applied to jvm-explorer</h2>
+
+      <p>Four new source files, one modified, three new test classes. The project gains its first real capability: it can read the raw material the JVM eats.</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>File</th><th>Status</th><th>Why it exists</th></tr></thead>
+          <tbody>
+            <tr><td><code>src/main/java/com/corejava/jvm/BytecodeSubject.java</code></td><td>new</td><td>four tiny methods built to be disassembled</td></tr>
+            <tr><td><code>src/main/java/com/corejava/jvm/ClassFileHeader.java</code></td><td>new</td><td>the decoded first eight bytes, as a value</td></tr>
+            <tr><td><code>src/main/java/com/corejava/jvm/ClassFileInspector.java</code></td><td>new</td><td>finds a class's own file and decodes that header</td></tr>
+            <tr><td><code>src/main/java/com/corejava/jvm/experiments/WarmupExperiment.java</code></td><td>new</td><td>makes JIT warm-up visible (labelled experiment)</td></tr>
+            <tr><td><code>src/main/java/com/corejava/jvm/JvmExplorer.java</code></td><td>modified</td><td>now reports class file versions beside the JVM's own</td></tr>
+            <tr><td><code>src/test/java/com/corejava/jvm/BytecodeSubjectTest.java</code></td><td>new</td><td>pins what the four samples do</td></tr>
+            <tr><td><code>src/test/java/com/corejava/jvm/ClassFileInspectorTest.java</code></td><td>new</td><td>turns the format's rules into assertions</td></tr>
+            <tr><td><code>src/test/java/com/corejava/jvm/experiments/WarmupExperimentTest.java</code></td><td>new</td><td>checks the experiment's shape, never its speed</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>6.1 The disassembly subject</h3>
+
+      <p>Saved at <code>jvm-explorer/src/main/java/com/corejava/jvm/BytecodeSubject.java</code>. The class is deliberately useless: every method was chosen for what its <em>compiled</em> form teaches.</p>
+
+      <pre class="code"><code><span class="kw">public final class</span> <span class="ty">BytecodeSubject</span> {
+
+    <span class="cmt">// Private + empty: nobody should instantiate a bag of teaching samples.</span>
+    <span class="cmt">// It is also the shortest possible proof that a constructor is just a method:</span>
+    <span class="cmt">// javap -c -p prints a Code: block for it, calling Object's constructor.</span>
+    <span class="kw">private</span> <span class="fn">BytecodeSubject</span>() {
+    }
+
+    <span class="cmt">// SAMPLE 1 - arguments arrive as numbered slots; arithmetic happens on a stack.</span>
+    <span class="kw">public static</span> <span class="ty">int</span> <span class="fn">add</span>(<span class="ty">int</span> a, <span class="ty">int</span> b) {
+        <span class="kw">return</span> a + b;                 <span class="cmt">// iload_0, iload_1, iadd, ireturn</span>
+    }
+
+    <span class="cmt">// SAMPLE 2 - the smallest thing that produces a jump: a loop is two jumps.</span>
+    <span class="kw">public static</span> <span class="ty">int</span> <span class="fn">sumTo</span>(<span class="ty">int</span> n) {
+        <span class="ty">int</span> total = <span class="num">0</span>;                <span class="cmt">// slot 1 (slot 0 holds the parameter n)</span>
+        <span class="kw">for</span> (<span class="ty">int</span> i = <span class="num">1</span>; i &lt;= n; i++) { <span class="cmt">// slot 2; iinc does the ++ in place</span>
+            total += i;               <span class="cmt">// four instructions, not one</span>
+        }
+        <span class="kw">return</span> total;
+    }
+
+    <span class="cmt">// SAMPLE 3 - one '+' becomes one invokedynamic; the literal is in the recipe.</span>
+    <span class="kw">public static</span> <span class="ty">String</span> <span class="fn">greet</span>(<span class="ty">String</span> name) {
+        <span class="kw">return</span> <span class="str">"Hello, "</span> + name;
+    }
+
+    <span class="cmt">// SAMPLE 4 - every 'new' in Java is new / dup / invokespecial.</span>
+    <span class="kw">public static</span> <span class="ty">Object</span> <span class="fn">newObject</span>() {
+        <span class="kw">return</span> <span class="kw">new</span> <span class="ty">Object</span>();
+    }
+}</code></pre>
+
+      <h3>6.2 The header, as a value</h3>
+
+      <p>Saved at <code>jvm-explorer/src/main/java/com/corejava/jvm/ClassFileHeader.java</code>. This file introduces one piece of Java syntax the course has not used yet, so here it is properly.</p>
+
+      <p>Writing a small class whose only job is to hold a few values means typing the same boilerplate every time: private fields, a constructor that assigns them, a reader method for each, plus <code>equals</code>, <code>hashCode</code> and <code>toString</code> if you want the object to behave sensibly. It is twenty lines of ceremony to carry four values. So Java added a shorthand: you declare the values in the header and the compiler generates all of that for you. For example, <code>record Point(int x, int y) { }</code> gives you a finished immutable class with <code>new Point(3, 4)</code>, <code>p.x()</code>, <code>p.y()</code>, and sensible equality — and the fields can never be changed afterwards. This shorthand is called a <strong>record</strong>. Our header is exactly that kind of thing: four facts read from bytes already on disk, which should never change.</p>
+
+      <pre class="code"><code><span class="kw">public record</span> <span class="ty">ClassFileHeader</span>(
+        <span class="ty">String</span> className,   <span class="cmt">// whose file this is</span>
+        <span class="ty">long</span> magic,         <span class="cmt">// bytes 0-3; long because 0xCAFEBABE overflows an int</span>
+        <span class="ty">int</span> minorVersion,   <span class="cmt">// bytes 4-5; 65535 means "compiled with preview features"</span>
+        <span class="ty">int</span> majorVersion) { <span class="cmt">// bytes 6-7; 65 means Java 21</span>
+
+    <span class="kw">public static final</span> <span class="ty">long</span> JAVA_MAGIC = <span class="num">0xCAFEBABEL</span>;
+    <span class="kw">public static final</span> <span class="ty">int</span> PREVIEW_MINOR_VERSION = <span class="num">65535</span>;
+    <span class="kw">private static final</span> <span class="ty">int</span> MAJOR_VERSION_OFFSET = <span class="num">44</span>;
+
+    <span class="cmt">// The check the JVM itself performs before reading one more byte.</span>
+    <span class="kw">public</span> <span class="ty">boolean</span> <span class="fn">hasJavaMagic</span>() {
+        <span class="kw">return</span> magic == JAVA_MAGIC;
+    }
+
+    <span class="cmt">// %08X = hexadecimal, uppercase, zero-padded to 8 digits -> "0xCAFEBABE".</span>
+    <span class="kw">public</span> <span class="ty">String</span> <span class="fn">magicAsHex</span>() {
+        <span class="kw">return</span> String.<span class="fn">format</span>(<span class="str">"0x%08X"</span>, magic);
+    }
+
+    <span class="cmt">// 65 helps nobody; "Java 21" is the fact you actually want.</span>
+    <span class="kw">public</span> <span class="ty">String</span> <span class="fn">javaVersionName</span>() {
+        <span class="kw">if</span> (majorVersion &gt;= <span class="num">49</span>) {                              <span class="cmt">// Java 5 and later</span>
+            <span class="kw">return</span> <span class="str">"Java "</span> + (majorVersion - MAJOR_VERSION_OFFSET);
+        }
+        <span class="kw">return</span> <span class="str">"Java 1."</span> + (majorVersion - MAJOR_VERSION_OFFSET); <span class="cmt">// 45 -> 1.1 … 48 -> 1.4</span>
+    }
+
+    <span class="cmt">// javac --enable-preview writes 65535 here; the JVM reads it to refuse the file</span>
+    <span class="cmt">// on any other release. This course never uses preview features.</span>
+    <span class="kw">public</span> <span class="ty">boolean</span> <span class="fn">usesPreviewFeatures</span>() {
+        <span class="kw">return</span> minorVersion == PREVIEW_MINOR_VERSION;
+    }
+
+    <span class="cmt">// One printable line, used by JvmExplorer's report.</span>
+    <span class="kw">public</span> <span class="ty">String</span> <span class="fn">describe</span>() { <span class="cmt">/* className + magic + major (+ name) + minor */</span> }
+}</code></pre>
+
+      <h3>6.3 The inspector</h3>
+
+      <p>Saved at <code>jvm-explorer/src/main/java/com/corejava/jvm/ClassFileInspector.java</code>. Its core was shown in Section 5.1; here is the whole method it hangs on, with the error handling that makes it usable rather than merely correct.</p>
+
+      <pre class="code"><code><span class="kw">public static</span> <span class="ty">ClassFileHeader</span> <span class="fn">inspect</span>(<span class="ty">Class</span>&lt;?&gt; type) {
+    <span class="cmt">// Fail at the door, naming the mistake, instead of a NullPointerException later.</span>
+    <span class="kw">if</span> (type == <span class="kw">null</span>) {
+        <span class="kw">throw new</span> <span class="ty">IllegalArgumentException</span>(<span class="str">"Cannot inspect a null class."</span>);
+    }
+
+    <span class="cmt">// com.corejava.jvm.Foo -> /com/corejava/jvm/Foo.class (leading / = class path root)</span>
+    <span class="ty">String</span> resourcePath = <span class="str">"/"</span> + type.<span class="fn">getName</span>().<span class="fn">replace</span>(<span class="str">'.'</span>, <span class="str">'/'</span>) + <span class="str">".class"</span>;
+
+    <span class="cmt">// try-with-resources: the stream closes itself, even if we throw.</span>
+    <span class="kw">try</span> (<span class="ty">InputStream</span> in = ClassFileInspector.<span class="kw">class</span>.<span class="fn">getResourceAsStream</span>(resourcePath)) {
+
+        <span class="kw">if</span> (in == <span class="kw">null</span>) {   <span class="cmt">// should be impossible for a loaded class - so say so loudly</span>
+            <span class="kw">throw new</span> <span class="ty">IllegalStateException</span>(
+                <span class="str">"No class file found on the class path at "</span> + resourcePath);
+        }
+
+        <span class="cmt">// readNBytes asks for exactly this many and reports what it really got.</span>
+        <span class="ty">byte</span>[] header = in.<span class="fn">readNBytes</span>(HEADER_BYTES);
+        <span class="kw">if</span> (header.length &lt; HEADER_BYTES) {
+            <span class="kw">throw new</span> <span class="ty">IllegalStateException</span>(<span class="cmt">/* names the actual length */</span>);
+        }
+
+        <span class="ty">long</span> magic        = <span class="fn">readUnsignedInt</span>(header, <span class="num">0</span>);   <span class="cmt">// bytes 0-3</span>
+        <span class="ty">int</span> minorVersion  = <span class="fn">readUnsignedShort</span>(header, <span class="num">4</span>); <span class="cmt">// bytes 4-5</span>
+        <span class="ty">int</span> majorVersion  = <span class="fn">readUnsignedShort</span>(header, <span class="num">6</span>); <span class="cmt">// bytes 6-7</span>
+
+        <span class="kw">return new</span> <span class="ty">ClassFileHeader</span>(type.<span class="fn">getName</span>(), magic, minorVersion, majorVersion);
+
+    } <span class="kw">catch</span> (<span class="ty">IOException</span> e) {
+        <span class="cmt">// Reading bytes the JVM already read should not fail; if it does, rethrow</span>
+        <span class="cmt">// unchecked but keep the original as the cause so nothing is lost.</span>
+        <span class="kw">throw new</span> <span class="ty">UncheckedIOException</span>(
+            <span class="str">"Failed to read the class file for "</span> + type.<span class="fn">getName</span>(), e);
+    }
+}</code></pre>
+
+      <h3>6.4 The warm-up experiment</h3>
+
+      <p>Saved at <code>jvm-explorer/src/main/java/com/corejava/jvm/experiments/WarmupExperiment.java</code> — in the <code>experiments</code> package, kept apart from the project's real capabilities on purpose.</p>
+
+      <pre class="code"><code><span class="cmt">// Results are added into a field that outlives the method, so the JVM cannot</span>
+<span class="cmt">// decide the whole loop is pointless and delete it. (Crude, but readable.)</span>
+<span class="kw">public static</span> <span class="ty">long</span> sink;
+
+<span class="kw">public static</span> <span class="ty">long</span>[] <span class="fn">timeBatches</span>(<span class="ty">int</span> batches, <span class="ty">int</span> callsPerBatch, <span class="ty">int</span> n) {
+    <span class="kw">if</span> (batches &lt; <span class="num">1</span> || callsPerBatch &lt; <span class="num">1</span> || n &lt; <span class="num">0</span>) {
+        <span class="kw">throw new</span> <span class="ty">IllegalArgumentException</span>(<span class="cmt">/* names the offending values */</span>);
+    }
+
+    <span class="ty">long</span>[] elapsedNanos = <span class="kw">new</span> <span class="ty">long</span>[batches];
+
+    <span class="kw">for</span> (<span class="ty">int</span> batch = <span class="num">0</span>; batch &lt; batches; batch++) {
+        <span class="cmt">// nanoTime is a stopwatch, not a clock: only DIFFERENCES are meaningful,</span>
+        <span class="cmt">// and it is immune to the system clock being adjusted mid-measurement.</span>
+        <span class="ty">long</span> start = System.<span class="fn">nanoTime</span>();
+
+        <span class="ty">long</span> batchTotal = <span class="num">0</span>;
+        <span class="kw">for</span> (<span class="ty">int</span> call = <span class="num">0</span>; call &lt; callsPerBatch; call++) {
+            batchTotal += BytecodeSubject.<span class="fn">sumTo</span>(n);  <span class="cmt">// the method under test</span>
+        }
+
+        sink += batchTotal;                            <span class="cmt">// publish, so it cannot vanish</span>
+        elapsedNanos[batch] = System.<span class="fn">nanoTime</span>() - start;
+    }
+    <span class="kw">return</span> elapsedNanos;
+}</code></pre>
+
+      <div class="callout forlearning">
+        <p>This is <strong>not</strong> how to benchmark Java, and using it as a template would be a genuine mistake. A real measurement must control for warm-up, dead-code elimination, constant folding, the effect of running the loop's own compilation on the timings, garbage collection pauses, CPU frequency scaling and more. The standard tool is <strong>JMH</strong> (the Java Microbenchmark Harness, part of OpenJDK), which handles all of that. This twenty-line stopwatch exists because it is readable in one sitting and makes the effect visible; Lesson 06 measures properly.</p>
+      </div>
+
+      <h3>6.5 The tests</h3>
+
+      <p>Three new test classes, seventeen tests in total across the project. The interesting ones are worth showing, because each encodes a rule of the format:</p>
+
+      <pre class="code"><code><span class="anno">@Test</span>
+<span class="kw">void</span> <span class="fn">everyClassFileStartsWithCafeBabe</span>() {
+    <span class="ty">ClassFileHeader</span> header = ClassFileInspector.<span class="fn">inspect</span>(BytecodeSubject.<span class="kw">class</span>);
+
+    <span class="fn">assertEquals</span>(ClassFileHeader.JAVA_MAGIC, header.<span class="fn">magic</span>(),
+            <span class="str">"A .class file must begin with the four bytes 0xCAFEBABE."</span>);
+    <span class="fn">assertTrue</span>(header.<span class="fn">hasJavaMagic</span>(), <span class="str">"hasJavaMagic() must agree with the raw magic value."</span>);
+    <span class="fn">assertEquals</span>(<span class="str">"0xCAFEBABE"</span>, header.<span class="fn">magicAsHex</span>(), <span class="str">"The magic number must print as 0xCAFEBABE."</span>);
+}
+
+<span class="anno">@Test</span>
+<span class="kw">void</span> <span class="fn">classFilesAreCompiledToThePinnedJavaVersion</span>() {
+    <span class="ty">ClassFileHeader</span> header = ClassFileInspector.<span class="fn">inspect</span>(BytecodeSubject.<span class="kw">class</span>);
+
+    <span class="fn">assertEquals</span>(JAVA_21_MAJOR_VERSION, header.<span class="fn">majorVersion</span>(),
+            <span class="cmt">// A failing test is read by someone who wants the fix, not a puzzle.</span>
+            <span class="str">"Class files should be Java 21 (major 65). Check &lt;maven.compiler.release&gt; in pom.xml."</span>);
+    <span class="fn">assertEquals</span>(<span class="str">"Java 21"</span>, header.<span class="fn">javaVersionName</span>(), <span class="str">"Major version 65 must decode to 'Java 21'."</span>);
+}
+
+<span class="anno">@Test</span>
+<span class="kw">void</span> <span class="fn">compiledVersionMatchesTheRunningJvm</span>() {
+    <span class="ty">ClassFileHeader</span> header = ClassFileInspector.<span class="fn">inspect</span>(JvmExplorer.<span class="kw">class</span>);
+
+    <span class="cmt">// The two numbers whose disagreement causes UnsupportedClassVersionError.</span>
+    <span class="fn">assertEquals</span>(<span class="str">"Java "</span> + Runtime.<span class="fn">version</span>().<span class="fn">feature</span>(), header.<span class="fn">javaVersionName</span>(),
+            <span class="str">"The class files we compile must name the same Java release as the JVM running them."</span>);
+}</code></pre>
+
+      <p>Notice what these add on top of <a href="../chapter-00-setup/lesson-00-full-setup.html">Lesson 00</a>'s environment test. That test proved we <em>run</em> on Java 21. These prove we <em>compile for</em> Java 21 — a different setting (<code>maven.compiler.release</code> in the POM) that can drift entirely on its own — and that the two agree. Between them, both halves of Sam's error message are now guarded by the build.</p>
+
+      <p>And one test is defined by what it deliberately does not assert:</p>
+
+      <pre class="code"><code><span class="cmt">// There is no test here claiming later batches are faster. That effect is real,</span>
+<span class="cmt">// but it depends on the machine, the JDK build, what else the OS is doing, and</span>
+<span class="cmt">// luck. An assertion on timing fails on a busy laptop and passes on an idle one -</span>
+<span class="cmt">// a coin toss wearing the costume of a test. Such a test is called FLAKY, and one</span>
+<span class="cmt">// flaky test poisons a suite: people start ignoring red builds.</span>
+<span class="anno">@Test</span>
+<span class="kw">void</span> <span class="fn">everyBatchTakesSomeMeasurableTime</span>() {
+    <span class="ty">long</span>[] elapsed = WarmupExperiment.<span class="fn">timeBatches</span>(<span class="num">3</span>, <span class="num">5_000</span>, <span class="num">100</span>);
+    <span class="kw">for</span> (<span class="ty">int</span> batch = <span class="num">0</span>; batch &lt; elapsed.length; batch++) {
+        <span class="fn">assertTrue</span>(elapsed[batch] &gt; <span class="num">0</span>, <span class="cmt">/* message naming the batch and the value */</span>);
+    }
+}</code></pre>
+
+      <h3>6.6 Run it all</h3>
+
+      <pre class="terminal"><code><span class="cmt"># everything below runs from inside jvm-explorer/</span>
+mvn test</code></pre>
+
+      <pre class="terminal"><code><span class="cmt">// PREDICTED (trimmed; Surefire's class order may differ)</span>
+[INFO] -------------------------------------------------------
+[INFO]  T E S T S
+[INFO] -------------------------------------------------------
+[INFO] Running com.corejava.jvm.BytecodeSubjectTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.0xx s
+[INFO] Running com.corejava.jvm.ClassFileInspectorTest
+[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.0xx s
+[INFO] Running com.corejava.jvm.JvmExplorerTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.0xx s
+[INFO] Running com.corejava.jvm.experiments.WarmupExperimentTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.1xx s
+[INFO]
+[INFO] Results:
+[INFO]
+<span class="out">[INFO] Tests run: 17, Failures: 0, Errors: 0, Skipped: 0</span>
+[INFO]
+<span class="out">[INFO] BUILD SUCCESS</span></code></pre>
+
+      <p>Then the main program, which now reports both halves of the version story:</p>
+
+      <pre class="terminal"><code>mvn compile exec:java</code></pre>
+
+      <pre class="terminal"><code><span class="cmt">// PREDICTED (your version, vendor, heap and core numbers will differ)</span>
+=== jvm-explorer: hello from inside the JVM ===
+Java version : 21.0.x
+JVM name     : OpenJDK 64-Bit Server VM
+JVM vendor   : Eclipse Adoptium
+Max heap     : 4096 MB
+CPU cores    : 8
+
+--- class file headers: what javac actually produced ---
+<span class="out">com.corejava.jvm.BytecodeSubject  magic=0xCAFEBABE  major=65 (Java 21)  minor=0</span>
+<span class="out">com.corejava.jvm.JvmExplorer  magic=0xCAFEBABE  major=65 (Java 21)  minor=0</span>
+Class files say : Java 21 (major 65)
+Running JVM is  : Java 21</code></pre>
+
+      <p>And the experiment, which needs its main class named explicitly because it is not the project's default:</p>
+
+      <pre class="terminal"><code>mvn compile exec:java -Dexec.mainClass=com.corejava.jvm.experiments.WarmupExperiment</code></pre>
+
+      <pre class="terminal"><code><span class="cmt">// PREDICTED SHAPE ONLY - every number here will be different on your machine,</span>
+<span class="cmt">// and different again on the next run. Only the downward trend is the point.</span>
+=== warm-up experiment: the same method, timed ten times ===
+<span class="out">batch  1 :    28.41 ms</span>
+batch  2 :    11.07 ms
+batch  3 :     4.92 ms
+batch  4 :     2.85 ms
+batch  5 :     2.31 ms
+batch  6 :     2.28 ms
+batch  7 :     2.26 ms
+<span class="out">batch  8 :     2.25 ms</span>
+batch  9 :     2.27 ms
+batch 10 :     2.24 ms
+sink (proves the work really happened): 1001000000000
+Timings vary by machine and run; the shape - early batches slower - is the point.</code></pre>
+
+      <p>Read that table as a story rather than as data. Batch 1 is mostly interpreted, and it is also paying for class loading and the first pass through cold code. By batch 3 or 4 the method has been called enough times that C1 and then C2 have produced native versions, and the remaining batches run at the compiled speed with only small wobbles. The exact batch where it settles will differ on your machine; on a very fast machine it may settle by batch 2, and if something else on your computer is busy you may see a stray spike anywhere. <strong>A batch that is slower than its neighbours is not a bug in the experiment</strong> — it is the operating system doing something else for a moment.</p>
+
+      <div class="callout tryit">
+        <p>Run all three commands from <code>jvm-explorer/</code>: <code>mvn test</code> (expect <code>Tests run: 17</code>, <code>BUILD SUCCESS</code>), <code>mvn compile exec:java</code>, and the warm-up experiment. Then run the experiment <em>twice more</em> — the numbers will move, and seeing them move is itself the lesson about naive benchmarks. <strong>Project state: compiles, 17 tests green</strong> (predicted — confirm with <code>mvn test</code>). If anything differs from the predictions above, the machine wins: tell me what you saw.</p>
+      </div>
+    </section>
+
+    <!-- ===================== SECTION 7 — IN THE WILD ===================== -->
+    <section id="s7">
+      <h2><span class="sec-num">7</span> In the wild</h2>
+
+      <p>Reading and writing class files is not an academic exercise — it is load-bearing infrastructure under tools you already use, usually invisibly.</p>
+
+      <p><strong>Mockito creates classes that were never compiled.</strong> When a test calls <code>mock(PaymentService.class)</code>, no source file for that mock exists anywhere. Mockito generates a class file's worth of bytes in memory — magic number, version, constant pool, methods, the lot — and hands them to the JVM to load. It does this through a library called <strong>Byte Buddy</strong>, whose entire job is assembling class files programmatically. The same trick, with different libraries, is how Hibernate makes lazy-loading proxies and how Spring wraps a bean so that a method call can be intercepted before it reaches your code.</p>
+
+      <p><strong>Lambdas are <code>invokedynamic</code>, exactly like our <code>greet</code> method.</strong> Write <code>list.forEach(x -&gt; System.out.println(x))</code> and disassemble it: there is no anonymous class in the bytecode. There is one <code>invokedynamic</code> instruction naming a JDK helper called <code>LambdaMetafactory</code>, which builds the implementation the first time that line runs, then reuses it. Our string concatenation used the same mechanism with a different helper (<code>makeConcatWithConstants</code>). Once you recognise the instruction, a whole family of modern Java features stops being mysterious: the compiler deferred the decision to the runtime.</p>
+
+      <p><strong>Every code-coverage report is bytecode manipulation.</strong> JaCoCo, the standard coverage tool, works by inserting extra instructions into your methods as they are loaded, so each branch records that it was reached. Your source is untouched; the class files the JVM actually runs are not the ones on disk.</p>
+
+      <p><strong>And <code>javap</code> is a normal working tool, not a curiosity.</strong> The realistic use is settling arguments: does this <code>switch</code> compile to a jump table? Did the compiler really inline that constant? Is this library's class file version too new for our runtime? For that last question there is a fast professional move — <code>javap -v SomeClass.class | findstr "major"</code> on Windows (or <code>| grep major</code> elsewhere) answers &ldquo;what Java version was this jar built for?&rdquo; without running anything at all.</p>
+
+      <div class="callout realworld">
+        <p>The class file version check is one of the most common production incidents in Java shops, and it has a distinctive shape: the code is fine, the tests passed, and the deploy fails at startup with <code>UnsupportedClassVersionError</code> because the build server's JDK is newer than the runtime image. Teams that have been burned once pin both — the compiler's <code>--release</code> <em>and</em> the base container image's JDK — and often add a build step that checks the produced class files, which is precisely what <code>classFilesAreCompiledToThePinnedJavaVersion</code> now does in this project.</p>
+      </div>
+
+      <div class="callout note">
+        <p>One item to verify rather than trust: recent JDKs added a built-in API for reading and writing class files (<code>java.lang.classfile</code>), which went through preview and was finalised in a release after 21. It is <strong>not</strong> available on our pinned Java 21 — check the release notes of your JDK before reaching for it. Everything in this lesson uses only <code>InputStream</code> and plain arithmetic, which work everywhere.</p>
+      </div>
+    </section>
+
+    <!-- ===================== SECTION 8 — GOTCHAS ===================== -->
+    <section id="s8">
+      <h2><span class="sec-num">8</span> Gotchas and common mistakes</h2>
+      <ul>
+        <li><strong>Forgetting that <code>byte</code> is signed.</strong> Every hand-written binary parser in Java hits this, usually once. Reading <code>0xCA</code> gives you −54, and combining raw bytes silently produces a wrong number rather than an error — the worst kind of bug, because it accuses the data. <em>Avoid it:</em> mask every byte with <code>&amp; 0xFF</code> the moment you take it out of the array, and hold four-byte unsigned values in a <code>long</code>, never an <code>int</code>.</li>
+        <li><strong>Reading <code>UnsupportedClassVersionError</code> backwards.</strong> The message names two numbers and it is easy to mix up whose is whose. The phrase <em>&ldquo;has been compiled by a more recent version&rdquo;</em> refers to the <strong>file</strong>; <em>&ldquo;this runtime only recognizes&rdquo;</em> refers to the <strong>JVM you are running</strong>. Subtract 44 from each to get Java releases. <em>Avoid it:</em> the fix is almost always to run a newer JVM, not to downgrade the build — and never to &ldquo;just rebuild&rdquo; without changing anything, which changes nothing.</li>
+        <li><strong>Using <code>-source</code>/<code>-target</code> instead of <code>--release</code>.</strong> The old flags set the language level and the class file version but still compile against the <em>current</em> JDK's libraries. So a build on JDK 21 with <code>-target 17</code> happily produces a class file marked 61 that calls a method which only exists in Java 21 — it compiles, ships, and then fails at runtime with <code>NoSuchMethodError</code> on the actual Java 17 machine. <em>Avoid it:</em> use <code>--release</code> (our POM's <code>maven.compiler.release</code>), which also swaps in that release's API definitions, so the compiler rejects the call up front.</li>
+        <li><strong>Expecting <code>javap</code> to show your source.</strong> It shows instructions, not code: comments, formatting and blank lines were never in the file. Local variable <em>names</em> and line numbers are optional extras that only appear if the compiler was told to record them (<code>javac -g</code>; Maven's compiler plugin enables debug information by default, which is why <code>javap -l</code> usually has something to show). <em>Avoid it:</em> use <code>-c</code> to read logic, <code>-v</code> for the header and constant pool, and remember that a stripped build may show nothing but slot numbers.</li>
+        <li><strong>Forgetting <code>-p</code>, then concluding a method does not exist.</strong> Plain <code>javap</code> prints only public members. A private method, a private constructor, or a package-private helper is simply absent from the output, which reads exactly like &ldquo;the compiler removed it.&rdquo; <em>Avoid it:</em> make <code>javap -c -p</code> your default muscle memory.</li>
+        <li><strong>Being surprised by extra <code>.class</code> files.</strong> One source file can produce several class files: a nested class becomes <code>Outer$Inner.class</code>, an anonymous class becomes <code>Outer$1.class</code>, and enums and records generate members you never typed. <em>Avoid it:</em> remember that the unit of compilation output is the <em>class</em>, not the file — and that <code>$</code> in a class file name means &ldquo;generated relationship,&rdquo; not a naming convention someone chose.</li>
+      </ul>
+    </section>
+
+    <!-- ===================== SECTION 9 — TRADEOFFS ===================== -->
+    <section id="s9">
+      <h2><span class="sec-num">9</span> Tradeoffs and when not to use this</h2>
+
+      <p>The bytecode-plus-JVM design buys portability and safety, and it is paid for in two currencies. The first is <strong>startup time</strong>: before your first line runs, a JVM process must start, find and verify class files, and begin interpreting — which is why a Java command-line tool that finishes in 200 milliseconds feels heavier than a native equivalent, and why short-lived serverless functions are an awkward fit. The second is <strong>warm-up</strong>: peak speed arrives seconds or minutes into the run, so a process that exits early never collects the benefit it paid for. There are answers to both — ahead-of-time compilation to a native binary (GraalVM native-image), class-data sharing, and ongoing work in the JDK itself — but they trade away flexibility, and they are firmly outside this course; name them, do not reach for them yet.</p>
+
+      <p>As for reading bytecode: be honest that it is a <em>diagnostic and learning</em> tool, not a daily practice. Ninety-nine times in a hundred, the right way to answer &ldquo;why is this slow?&rdquo; is a profiler (which tells you <em>where</em> time goes, which bytecode never can) or a proper benchmark with JMH (which measures the compiled reality rather than the shipped instructions). Bytecode is what you <em>ship</em>; native code produced by C2 is what actually <em>runs</em>, and the two can differ dramatically — a loop may be unrolled, a method inlined out of existence, an object never allocated at all. Optimising your source because the disassembly looks long is a classic way to waste a day and make code worse. Read bytecode to understand a mechanism, to settle a factual argument about what the compiler emits, or to inspect a jar you cannot rebuild. For everything else, measure.</p>
+
+      <p>And the tiny module we built has a deliberate boundary: it reads eight bytes, not the whole format. Parsing the constant pool by hand is genuinely intricate, and it is solved work — <code>javap</code> does it, Byte Buddy and ASM do it. Writing our own would teach less per hour than the rest of this course. Knowing that the format is <em>readable</em>, and having read part of it yourself, is the lasting value.</p>
+    </section>
+
+    <!-- ===================== SECTION 10 — TAKEAWAYS ===================== -->
+    <section id="s10">
+      <h2><span class="sec-num">10</span> Key takeaways</h2>
+      <ul>
+        <li><code>javac</code> does not produce machine code for your chip; it produces bytecode — instructions for an imaginary stack machine — and it is that single compiled file, not the source, which is what &ldquo;write once, run anywhere&rdquo; actually makes portable.</li>
+        <li>A <code>.class</code> file is a documented binary format that always begins with the same eight bytes: the magic number <code>0xCAFEBABE</code>, then the minor version, then the major version — where the Java release is the major version minus 44, so Java 21 writes 65.</li>
+        <li>The JVM checks those version bytes before executing anything, and the rule is one-directional: a newer JVM runs older class files, an older JVM always refuses newer ones, which is exactly what <code>UnsupportedClassVersionError</code> reports.</li>
+        <li>Bytecode computes on an operand stack using numbered local variable slots, so instructions are small and typed by name (<code>iload</code>, <code>iadd</code>, <code>areturn</code>); loops are a conditional forward jump plus an unconditional backward one, and <code>new</code> is always the trio <code>new</code>, <code>dup</code>, <code>invokespecial</code>.</li>
+        <li>The JVM interprets your bytecode immediately and, in the background, compiles the methods that prove themselves hot into native code — which is why the same loop is slow on its first run and fast on its tenth, and why any Java measurement taken without warm-up is worthless.</li>
+      </ul>
+    </section>
+
+    <!-- ===================== SECTION 11 — CHALLENGE ===================== -->
+    <section id="s11">
+      <h2><span class="sec-num">11</span> Challenge</h2>
+
+      <p><strong>Part A — decode an incident.</strong> A colleague's deploy fails at startup:</p>
+
+      <pre class="terminal"><code>java.lang.UnsupportedClassVersionError: com/acme/Report has been compiled by a
+more recent version of the Java Runtime (class file version 65.0), this runtime
+only recognizes class file version 55.0</code></pre>
+
+      <p>(1) Translate both numbers into Java releases. (2) Say in one sentence which machine has the problem — the build machine or the runtime machine. (3) Give two possible fixes and say which is usually correct. (4) Name one command that would have revealed this from the jar <em>before</em> deploying, without running any of the code.</p>
+
+      <p><strong>Part B — predict a disassembly.</strong> Without compiling anything, write down the bytecode you expect for this method, including the byte offsets:</p>
+
+      <pre class="code"><code><span class="kw">public static</span> <span class="ty">int</span> <span class="fn">twice</span>(<span class="ty">int</span> x) {
+    <span class="kw">return</span> x + x;
+}</code></pre>
+
+      <p>Then check yourself: add the method to <code>BytecodeSubject</code>, run <code>mvn compile</code>, and disassemble. <em>Bonus:</em> before you look, predict whether <code>x + x</code> and <code>x * 2</code> produce the same instructions — and then find out.</p>
+
+      <details class="answer">
+        <summary>Click to reveal the answer</summary>
+
+        <p><strong>Part A (1) — the numbers.</strong> Subtract 44 from each. The class file's 65 means it was compiled for <strong>Java 21</strong>. The runtime's 55 means the JVM trying to run it is <strong>Java 11</strong>.</p>
+
+        <p><strong>Part A (2) — whose problem.</strong> Neither machine is broken; they disagree. But the <em>mismatch</em> is a property of the pair, and the practical statement is: the runtime machine is too old for the artifact it was given. The build machine did nothing illegal — it did exactly what it was configured to do.</p>
+
+        <p><strong>Part A (3) — two fixes.</strong> Either (a) upgrade the runtime to Java 21 or newer, or (b) build for Java 11 by setting <code>maven.compiler.release</code> to 11 (never <code>-target</code> alone — see Gotcha 3, which is how you turn this loud startup failure into a quiet <code>NoSuchMethodError</code> later). Usually (a) is correct: the code was written and tested against Java 21's language and libraries, and downgrading the target may not even compile — and if it does, it silently gives up whatever Java 21 features the code uses. Fix (b) is right only when the runtime genuinely cannot be moved, in which case the whole project should be pinned to 11 and tested there, not just re-targeted at the last minute.</p>
+
+        <p><strong>Part A (4) — the pre-flight command.</strong> Unpack or list the jar and run <code>javap -v</code> on any class inside it, reading the <code>major version:</code> line:</p>
+
+        <pre class="terminal"><code>javap -v -cp report.jar com.acme.Report | findstr "major"
+<span class="cmt"># on macOS/Linux:  javap -v -cp report.jar com.acme.Report | grep major</span>
+<span class="out">  major version: 65</span></code></pre>
+
+        <p>This reads the file's bytes 6–7 and never executes a line of the code. (Our own <code>ClassFileInspector</code> answers the same question in the same way, from inside a running program.)</p>
+
+        <p><strong>Part B — the predicted disassembly.</strong> The parameter <code>x</code> is in slot 0 because the method is static; it must be pushed <em>twice</em>, because <code>iadd</code> consumes two stack values and there is no instruction meaning &ldquo;double the top of the stack&rdquo;:</p>
+
+        <pre class="terminal"><code><span class="cmt">// PREDICTED javap -c output for twice(int)</span>
+  public static int twice(int);
+    Code:
+       0: iload_0        <span class="cmt">// push x</span>
+       1: iload_0        <span class="cmt">// push x again - the same slot, read twice</span>
+       2: iadd           <span class="cmt">// pop both, push the sum</span>
+       3: ireturn        <span class="cmt">// return it</span></code></pre>
+
+        <p>All four instructions are one byte, so the offsets are 0, 1, 2, 3 — exactly the shape of <code>add</code>, with one slot doing the work of two.</p>
+
+        <p><strong>Bonus — <code>x + x</code> versus <code>x * 2</code>.</strong> They produce <em>different</em> bytecode. <code>x * 2</code> is predicted to be:</p>
+
+        <pre class="terminal"><code>       0: iload_0        <span class="cmt">// push x</span>
+       1: iconst_2       <span class="cmt">// push the constant 2</span>
+       2: imul           <span class="cmt">// pop both, push the product</span>
+       3: ireturn</code></pre>
+
+        <p>Same length, same speed in practice, different instructions — because <code>javac</code> does very little optimising. It translates faithfully and leaves the clever work to the JIT, which will turn both into the same native code (probably a single shift or add) once the method is hot. That is the deeper point of the whole lesson in miniature: <strong>bytecode reflects your source closely; native code does not have to.</strong></p>
+      </details>
+    </section>
+
+    <!-- ===================== SECTION 12 — ALMANAC ===================== -->
+    <section id="s12">
+      <h2><span class="sec-num">12</span> Almanac update</h2>
+      <p>Added to <code>almanac.md</code> this lesson: the class file version table and the <em>Java release = major − 44</em> rule; the one-directional compatibility rule (newer JVM runs older files, never the reverse) and how to decode <code>UnsupportedClassVersionError</code>; <code>--release</code> rather than <code>-source</code>/<code>-target</code>; the eight-byte header layout and the <code>&amp; 0xFF</code> signed-byte rule; the <code>javap</code> command cheat-sheet (<code>-c</code>, <code>-p</code>, <code>-v</code>, <code>-l</code>) and how to read an offset; the bytecode shapes worth recognising (loop = two jumps, <code>new</code> = <code>new</code>/<code>dup</code>/<code>invokespecial</code>, the four <code>invoke</code> instructions, <code>invokedynamic</code> for string concat and lambdas); and the interpreter/JIT rule that no Java timing means anything without warm-up.</p>
+    </section>
+
+    <!-- ===================== SECTION 13 — WHAT IS NEXT ===================== -->
+    <section id="s13">
+      <div class="nextup">
+        <p class="kicker">What is next</p>
+        <h2>Lesson 02 — Class loading</h2>
+        <p>We just asked the JVM for a class's own bytes with <code>getResourceAsStream</code>, and skipped past the obvious question: who found that file, and when? Lesson 02 answers it — the three built-in class loaders and the parent-delegation rule they follow, the difference between loading, linking and initialising, and the exact moment a class's static code runs. The project gains a module that logs class loading as it happens.</p>
+      </div>
+    </section>
+
+    <p class="position">Lesson 01 of 07 — Core Java Course 01: JVM Internals &amp; Memory Management</p>
+
+  </main>
+</div>
+</body>
+</html>

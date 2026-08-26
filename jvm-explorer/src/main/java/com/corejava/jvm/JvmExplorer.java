@@ -51,5 +51,27 @@ public final class JvmExplorer {
         // JVM sizes its garbage-collection threads from this number - a fact that
         // becomes important when we study GC behavior in Lessons 04 and 05.
         System.out.println("CPU cores    : " + Runtime.getRuntime().availableProcessors());
+
+        // ---- Lesson 01: what this JVM is actually being fed -------------------
+        // A blank line, then a heading, so the two halves of the report read as two
+        // separate questions: "which engine is running?" and "what is it running?".
+        System.out.println();
+        System.out.println("--- class file headers: what javac actually produced ---");
+
+        // Every class the JVM runs arrived as a .class file whose first eight bytes
+        // announce the file type and the format version. Printing them for two of our
+        // own classes shows that this is not theory: our compiled output really does
+        // start with 0xCAFEBABE and really does carry the version number the JVM checks.
+        System.out.println(ClassFileInspector.inspect(BytecodeSubject.class).describe());
+        System.out.println(ClassFileInspector.inspect(JvmExplorer.class).describe());
+
+        // The two numbers that must agree for anything to run at all: the version the
+        // COMPILER wrote into the file, and the version the RUNNING ENGINE understands.
+        // When these disagree the JVM refuses the file with UnsupportedClassVersionError,
+        // so printing them side by side turns that error message into something readable.
+        ClassFileHeader ownHeader = ClassFileInspector.inspect(JvmExplorer.class);
+        System.out.println("Class files say : " + ownHeader.javaVersionName()
+                + " (major " + ownHeader.majorVersion() + ")");
+        System.out.println("Running JVM is  : Java " + Runtime.version().feature());
     }
 }

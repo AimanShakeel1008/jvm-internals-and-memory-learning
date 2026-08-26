@@ -64,3 +64,50 @@ Decodes the errors this course's setup and lessons are likely to produce, with t
 
 **What it means:** GitHub no longer accepts account passwords from the command line; it needs a credential helper or token.
 **Fix:** the Windows Git installer includes Git Credential Manager — the first `git push` should open a browser window to log in. If no window appears, run `git config --global credential.helper manager` and push again.
+
+---
+
+## Lesson 01 — bytecode and class file errors
+
+### `'javap' is not recognized as an internal or external command`
+
+**What it means:** the terminal cannot find `javap`, which ships inside the JDK next to `java` and `javac`.
+**Fix:** you almost certainly have a JRE-only or partial installation on the PATH ahead of the real JDK. Check `javac -version` too — if that also fails, reinstall Temurin 21 with "Add to PATH" enabled. Otherwise call it by full path once to confirm it exists: `"%JAVA_HOME%\bin\javap" -version`.
+
+### `javap` prints `Error: class not found` for a class you can see on disk
+
+**What it means:** `javap` was given a class *name* but does not know where to look, or was given a path it cannot resolve.
+**Fix:** either point at the file directly — `javap -c -p target/classes/com/corejava/jvm/BytecodeSubject.class` — or give it the class path and the full package name: `javap -c -p -cp target/classes com.corejava.jvm.BytecodeSubject`. Mixing the two (a file path *and* a package name) does not work.
+
+### `javap` says the file does not exist, right after editing the source
+
+**What it means:** `javap` reads compiled files, and `target/classes/` still holds the previous build (or nothing at all).
+**Fix:** run `mvn compile` first, every time. If the file is still missing, check that the folders under `target/classes/` match the `package` line.
+
+### `javap` output has no `Code:` blocks
+
+**What it means:** the `-c` flag was omitted. Plain `javap` prints signatures only.
+**Fix:** `javap -c`. And add `-p`, or private members (including the private constructor) will be missing entirely, which looks exactly like the compiler having deleted them.
+
+### `type` / `cat` on a `.class` file prints garbage and messes up the terminal
+
+**Not an error.** A class file is binary; a text viewer guesses each byte is a character and prints the guess, and some byte values are terminal control codes. Nothing is damaged. Use `javap` to read the file, and run `cls` to tidy the terminal.
+
+### `UnsupportedClassVersionError: ... class file version 65.0 ... only recognizes 61.0`
+
+**What it means:** the class file was compiled for a newer Java than the JVM trying to run it. Subtract 44 from each number: 65 = Java 21, 61 = Java 17.
+**Fix:** run it on a JVM of that release or newer (usually correct), or rebuild the project with `<maven.compiler.release>` set to the older release — and then actually test on that release. Never use `-source`/`-target` alone to do this; see the almanac.
+
+### `mvn test` fails: `classFilesAreCompiledToThePinnedJavaVersion` — expected 65
+
+**What it means:** the build produced class files for a Java release other than 21.
+**Fix:** check `<maven.compiler.release>21</maven.compiler.release>` is still in `jvm-explorer/pom.xml`, then `mvn clean test` so no stale class files from an earlier setting survive in `target/`.
+
+### `exec:java` runs `JvmExplorer` when you wanted the warm-up experiment
+
+**What it means:** the POM sets a default main class, so a bare `mvn exec:java` always runs that one.
+**Fix:** name the class explicitly: `mvn compile exec:java -Dexec.mainClass=com.corejava.jvm.experiments.WarmupExperiment`. In PowerShell, quote it if the shell objects: `mvn compile exec:java "-Dexec.mainClass=com.corejava.jvm.experiments.WarmupExperiment"`.
+
+### The warm-up experiment's timings do not go down, or one batch spikes
+
+**Not an error.** Timings depend on the machine, the JDK build, and whatever else the operating system is doing. On a fast machine the method may be compiled by batch 2, so the drop is over before you see it; a background process can make any batch slow. Run it a few times — the *shape* is the observation, and no test asserts on these numbers precisely because they are not dependable.
