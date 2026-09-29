@@ -69,3 +69,50 @@ Decodes the errors this course's setup and lessons are likely to produce, with t
 
 **What it means:** GitHub no longer accepts account passwords from the command line; it needs a credential helper or token.
 **Fix:** the Windows Git installer includes Git Credential Manager — the first `git push` should open a browser window to log in. If no window appears, run `git config --global credential.helper manager` and push again.
+
+---
+
+## Lesson 01 — bytecode and class file errors
+
+### `'javap' is not recognized as an internal or external command`
+
+**What it means:** the terminal cannot find `javap`, which ships inside the JDK next to `java` and `javac`.
+**Fix:** a runtime-only or partial installation is probably ahead of the real JDK on PATH. Check `javac -version` too — if that also fails, reinstall Temurin 21 with "Add to PATH" enabled. To confirm it exists, call it by full path once: `"%JAVA_HOME%\bin\javap" -version`.
+
+### `javap` prints `Error: class not found` for a class you can see on disk
+
+**What it means:** `javap` was given a class *name* but not where to look, or a path it cannot resolve.
+**Fix:** either point at the file — `javap -c -p target/classes/com/corejava/jvm/BytecodeSubject.class` — or give the class path plus the full name: `javap -c -p -cp target/classes com.corejava.jvm.BytecodeSubject`. Do not mix a file path with a package name.
+
+### `javap` says the file does not exist, right after editing the source
+
+**What it means:** `javap` reads compiled files, and `target/classes/` still holds the previous build (or nothing).
+**Fix:** run `mvn compile` first, every time.
+
+### `javap` output has no `Code:` blocks, or a method seems to be missing
+
+**What it means:** `-c` was left out (plain `javap` prints signatures only), or `-p` was left out (private members are hidden).
+**Fix:** use `javap -c -p`.
+
+### `type` / `cat` on a `.class` file prints garbage and messes up the terminal
+
+**Not an error.** A class file is binary; a text viewer guesses each byte is a character. Nothing is damaged. Use `javap`, and run `cls` to tidy the terminal.
+
+### `UnsupportedClassVersionError: ... class file version 65.0 ... only recognizes 61.0`
+
+**What it means:** the class file was compiled for a newer Java than the JVM trying to run it. Subtract 44 from each number: 65 = Java 21, 61 = Java 17.
+**Fix:** run it on a JVM of that release or newer (usually right), or rebuild with `<maven.compiler.release>` set to the older release and then actually test on it. Never use `-source`/`-target` alone.
+
+### `mvn test` fails: `classFilesAreCompiledToThePinnedJavaVersion` — expected 65
+
+**What it means:** the build produced class files for a Java release other than 21.
+**Fix:** check `<maven.compiler.release>21</maven.compiler.release>` is still in `jvm-explorer/pom.xml`, then `mvn clean test` so no stale class files survive.
+
+### `exec:java` runs `JvmExplorer` when you wanted the warm-up experiment
+
+**What it means:** the POM sets a default main class, so a bare `mvn exec:java` always runs that one.
+**Fix:** name the class: `mvn compile exec:java -Dexec.mainClass=com.corejava.jvm.experiments.WarmupExperiment`. If PowerShell objects, quote it: `mvn compile exec:java "-Dexec.mainClass=com.corejava.jvm.experiments.WarmupExperiment"`.
+
+### The warm-up experiment's timings do not go down, or one batch spikes
+
+**Not an error.** Timings depend on the machine, the JDK build, and whatever else is running. On a fast machine the drop may be over by batch 2; a background process can slow any batch. Run it a few times — the *shape* is the observation, which is why no test asserts on these numbers.
