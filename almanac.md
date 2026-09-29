@@ -83,3 +83,70 @@ The living cheat-sheet of this course: rules of thumb, contracts, gotchas, and d
 - **No Java timing means anything without warm-up.** First run slow, tenth run fast is normal.
 - **Bytecode is what you ship; native code is what runs.** Read bytecode to understand mechanisms and settle facts; use a profiler or JMH to find and measure slowness.
 - **Never assert on timing in a test.** Assert the shape (count of results, positive elapsed time, work done); let human eyes read the timings.
+
+---
+
+## Lesson 02 — Class Loading
+
+**The three built-in loaders** (every standard JVM starts with these, in this parent chain):
+
+| Loader | `getName()` | Defines | Parent |
+| --- | --- | --- | --- |
+| Bootstrap | *no Java object — `getClassLoader()` returns `null`* | `java.base`: `Object`, `String`, `Integer`… | — (top) |
+| Platform | `"platform"` | the rest of the JDK, e.g. `java.sql`, `java.xml` | bootstrap |
+| Application | `"app"` | your class path — your code and libraries | platform |
+
+- **`getClassLoader() == null` means bootstrap, not "missing".** Calling a method on it is a guaranteed `NullPointerException`. Translate null to the word "bootstrap" at the boundary.
+- **`ClassLoader.getSystemClassLoader()` is the APPLICATION loader.** "System" is historical and has nothing to do with the operating system.
+- **Parent delegation: ask upward first, search downward.** Payoffs: a forged `java.lang.String` on your class path is *unreachable*; every JDK class exists exactly once; "not found" means genuinely nowhere.
+- **Delegation is a convention in `ClassLoader.loadClass`, not a law.** Servlet containers and plugin systems deliberately invert it, which is where the strangest class-loading bugs live.
+- **A class's runtime identity is its name PLUS its defining loader.** Two loaders defining `com.acme.Config` give two incompatible types → `ClassCastException: com.acme.Config cannot be cast to com.acme.Config`. Read the loader names in brackets; usually one jar is present in two places.
+
+**The five lifecycle steps** — *loading → linking (verify, prepare, resolve) → initialization*:
+
+| Step | What actually happens |
+| --- | --- |
+| 1 Loading | find the bytes, parse them, make the `Class` object. Magic number + version checked here. |
+| 2a Verification | prove the bytecode cannot misbehave *before* running it. Failure = `VerifyError`. |
+| 2b Preparation | static fields get **default** values (`0` / `false` / `null`) — *not* yours. Compile-time constants are the exception: filled in here from `ConstantValue`. |
+| 2c Resolution | `#7` symbols become real pointers. HotSpot does this **lazily** — a missing class can surface hours into a run. |
+| 3 Initialization | `<clinit>` runs: your static assignments and `static { }` blocks, in **source order**, exactly once. |
+
+**`<clinit>` — three permanent facts:**
+
+- **Runs exactly once, per class, per loader.** There is no "re-initialize". Hot reload = a whole new class loader.
+- **Thread-safe for free.** The JVM locks it — which is what makes the *initialization-on-demand holder* idiom work with no `synchronized`.
+- **If it throws, the class is poisoned forever.** First failure = `ExceptionInInitializerError` (with the real cause). Every later touch = `NoClassDefFoundError: Could not initialize class X`.
+- **Keep `<clinit>` boring.** No file reading, no network, nothing that can throw. Put anything that can fail in a method the caller invokes on purpose.
+
+**What triggers initialization:**
+
+| Wakes the class | Leaves it cold |
+| --- | --- |
+| `new Foo()` | `import com.acme.Foo;` |
+| a `static` method **declared by** `Foo` | `Foo.class` |
+| a **non-constant** `static` field declared by `Foo` | `new Foo[10]` |
+| `Class.forName("Foo")` | `Class.forName("Foo", false, loader)` / `loader.loadClass("Foo")` |
+| initializing a **subclass** (parent goes first) | reading a `static final` compile-time constant |
+| being the class named on the `java` command line | a static field declared in the **superclass**, named through the subclass |
+| | initializing a superclass (parents never wake children) |
+
+- **Only the class that DECLARES a static field initializes.** `Child.PARENT_FIELD` initializes `Parent` only; `Child` is loaded but stays cold.
+- **Compile-time constants are inlined into the reader's own class file.** Changing `public static final String API_VERSION = "1.0"` in a library does nothing for callers that were not recompiled. Expose changeable values through a method or a non-constant field; rebuild every consumer from clean when a constant changes.
+- **A mention is not a use.** An import never registers a JDBC driver; that is why old code calls `Class.forName("...Driver")`.
+
+**Reading the errors:**
+
+| Message | Real meaning | Where to look |
+| --- | --- | --- |
+| `ClassNotFoundException` (checked) | someone asked **by name as text** and the whole chain came up empty | the name: typo, wrong package, jar absent |
+| `NoClassDefFoundError` (Error) | the JVM was **resolving** a reference your compiled code contains | a dependency present at build time, missing at run time |
+| `NoClassDefFoundError: Could not initialize class X` | X is **present** and permanently broken — its `<clinit>` threw earlier | scroll **back** for the first `ExceptionInInitializerError` |
+| `ExceptionInInitializerError` | the first static-initializer failure | its `getCause()` |
+| `ClassCastException: X cannot be cast to X` | two loaders, one name, two types | the loader names in brackets |
+
+**Observing it:**
+
+- `java -verbose:class -cp target/classes com.example.Main` — one line per class as it loads, with its source. `-Xlog:class+load=info` is the modern equivalent; `-Xlog:class+load=info:file=classes.txt` sends it to a file.
+- **Use a plain `java` command, not `mvn exec:java`,** for this — `exec:java` runs inside Maven's own JVM.
+- **Custom class loaders solve exactly two problems:** isolation and reloading. Everything else is a dependency-management problem. Every custom loader risks a **class loader leak**.

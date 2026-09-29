@@ -116,3 +116,60 @@ Decodes the errors this course's setup and lessons are likely to produce, with t
 ### The warm-up experiment's timings do not go down, or one batch spikes
 
 **Not an error.** Timings depend on the machine, the JDK build, and whatever else is running. On a fast machine the drop may be over by batch 2; a background process can slow any batch. Run it a few times — the *shape* is the observation, which is why no test asserts on these numbers.
+
+---
+
+## Lesson 02 — class loading errors
+
+### `NullPointerException` on a line calling `getClassLoader()`
+
+**What it means:** `SomeJdkClass.class.getClassLoader()` returns `null` for anything the bootstrap loader defined (`String`, `Object`, everything in `java.base`). That `null` means "bootstrap loader" — C++ code with no Java object.
+**Fix:** check for null and treat it as "bootstrap", the way `ClassLoaderReporter.describe` does. For resources, prefer `YourClass.class.getResourceAsStream("/path")`.
+
+### `ClassNotFoundException: com.example.Something`
+
+**What it means:** something asked for that class **by name, as text** (`Class.forName`, `loadClass`, a framework reading a config file) and the whole delegation chain found nothing.
+**Fix:** check the name character by character first, then confirm the jar is on the class path you are *running* with, not just the one you compiled with.
+
+### `NoClassDefFoundError: com/example/Something`
+
+**What it means:** your *compiled code* refers to that class, so it existed when you compiled; at run time it was gone. (The slashes are the internal form of the name.)
+**Fix:** a packaging problem, not a name problem. Compare the compile class path with the runtime class path: a `provided` dependency, a jar not copied into the image.
+
+### `NoClassDefFoundError: Could not initialize class com.example.Settings`
+
+**What it means:** NOT that the class is missing. It is present, but its static initializer threw earlier, so the JVM marked it permanently unusable.
+**Fix:** search **backwards** in the log for the first `ExceptionInInitializerError` naming that class — its `Caused by:` is the real problem.
+
+### `ExceptionInInitializerError`
+
+**What it means:** a `static` block or static field initializer threw. This is the *first* failure, and the useful one.
+**Fix:** read the `Caused by:`. Longer term, move anything that can fail out of the static initializer into a method the caller invokes on purpose.
+
+### `ClassCastException: com.acme.Config cannot be cast to com.acme.Config`
+
+**What it means:** two different class loaders each defined a class with that name; a class's identity is its name *plus* its loader. The two loaders are named in brackets at the end of the message.
+**Fix:** find why the class is available in two places (usually a shared API jar bundled inside a plugin *and* on the parent class path) and remove the duplicate.
+
+### `-verbose:class` prints thousands of lines and drowns my program's output
+
+**Not an error** — the JVM really loads that many classes. Filter it: `... | findstr YourClassName` on Windows, `... | grep YourClassName` elsewhere. Or write it to a file: `java -Xlog:class+load=info:file=classes.txt -cp target/classes com.corejava.jvm.JvmExplorer`.
+
+### `-verbose:class` with `mvn exec:java` shows Maven's classes, not mine
+
+**What it means:** `exec:java` runs your `main` inside Maven's own JVM.
+**Fix:** `mvn compile`, then run a clean JVM directly: `java -verbose:class -cp target/classes com.corejava.jvm.experiments.ClassLoadingExperiment`.
+
+### `Error: Could not find or load main class` from a plain `java` command
+
+**What it means:** the class path you gave `java` does not contain the class, or you gave a file path where a class name belongs.
+**Fix:** run from inside `jvm-explorer/` after `mvn compile`, with `-cp target/classes` and the **fully-qualified class name** (dots, no `.class`).
+
+### `mvn test` fails a lazy-initialization test with "the log must be silent"
+
+**What it means:** one of the demonstration subjects (`ConstantHolder`, `LazyHolder`, `ForNameSubject`, `InitOrderParent`/`InitOrderChild`) was initialized by something other than its own test. A class initializes once per JVM and cannot be reset.
+**Fix:** find what else touched it. Each subject must be referenced by exactly one test method and nothing else — the rule is in `LazyInitializationTest`'s header comment.
+
+### A stray `>>> LateComer's static initializer is running NOW` line in the test output
+
+**Not an error.** That is the experiment's nested class printing from inside its own `<clinit>` during the test that calls its static method.

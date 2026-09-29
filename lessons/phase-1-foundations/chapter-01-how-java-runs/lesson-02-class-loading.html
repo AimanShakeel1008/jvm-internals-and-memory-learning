@@ -568,6 +568,29 @@
         <li><strong>If it throws, the class is poisoned forever.</strong> The first failure surfaces as <code>ExceptionInInitializerError</code>, wrapping whatever your code actually threw. Every later attempt to use that class gets <code>NoClassDefFoundError: Could not initialize class …</code> — a different error, with the real cause nowhere in sight. This is the mechanism behind the confusing failure from Section 1.</li>
       </ul>
 
+      <p><strong>What goes wrong when you forget those three facts.</strong> Here is a very common piece of code — a settings class that loads its file in a static block:</p>
+
+      <pre class="code"><code><span class="cmt">// WRONG: runs at a moment you do not control, and its failure reaches the wrong person</span>
+<span class="kw">public final class</span> <span class="ty">Settings</span> {
+    <span class="kw">public static final</span> <span class="ty">Properties</span> VALUES = <span class="kw">new</span> <span class="ty">Properties</span>();
+    <span class="kw">static</span> {
+        <span class="kw">try</span> (<span class="ty">InputStream</span> in = <span class="kw">new</span> <span class="ty">FileInputStream</span>(<span class="str">"/etc/app/settings.properties"</span>)) {
+            VALUES.<span class="fn">load</span>(in);                    <span class="cmt">// file reading inside &lt;clinit&gt;</span>
+        } <span class="kw">catch</span> (<span class="ty">IOException</span> e) {
+            <span class="kw">throw new</span> <span class="ty">RuntimeException</span>(e);      <span class="cmt">// ...and it can throw</span>
+        }
+    }
+}</code></pre>
+
+      <pre class="terminal"><code><span class="cmt">// PREDICTED symptom on a machine where the file is missing — the first caller sees:</span>
+<span class="out">java.lang.ExceptionInInitializerError</span>
+Caused by: java.lang.RuntimeException: java.io.FileNotFoundException: /etc/app/settings.properties
+
+<span class="cmt">// ...and every caller after that sees only:</span>
+<span class="out">java.lang.NoClassDefFoundError: Could not initialize class com.acme.Settings</span></code></pre>
+
+      <p>The file is read whenever something first touches <code>Settings</code> — at startup, ten minutes in, or never. Only the first thread sees the useful error. And no test can make it read a different file, or reset it, because a class initializes once per loader. <strong>The cure:</strong> keep static initializers to simple assignments that cannot fail, and put anything that can fail — files, network, configuration — in a method the caller invokes on purpose. That is why every static block in our project does exactly one thing: add a name to an in-memory list.</p>
+
       <h3>3.9 Exactly when a class initializes</h3>
 
       <p>Now the rules. The Java Language Specification lists precisely what triggers initialization, and the list is shorter than people expect. A class initializes on the first occurrence of any of these:</p>
@@ -610,6 +633,13 @@
       <p>The source says <code>Child</code>. The field is declared in <code>Parent</code>. Initialization follows the <em>declaration</em>, not the name you typed. <code>Child</code> does get loaded — the JVM has to look at it to discover the field is inherited — but its <code>&lt;clinit&gt;</code> does not run. Our project asserts exactly this, and it is one of the few places the language specification bothers to spell out an example, precisely because everyone gets it wrong.</p>
 
       <p>Two smaller rules, for completeness. Interfaces initialize under the same conditions, but with a twist: initializing a class initializes its superclasses <em>and</em> any superinterfaces that declare <code>default</code> methods — not plain constant-only interfaces. And an <code>assert</code> statement inside a class counts as a trigger for that class, which is an obscure corner you will likely never meet.</p>
+
+      <p><strong>What goes wrong when you mistake a mention for a use.</strong> For years, programs connecting to a database did this, and it failed with &ldquo;no suitable driver found&rdquo;:</p>
+
+      <pre class="code"><code><span class="kw">import</span> com.mysql.cj.jdbc.Driver;                       <span class="cmt">// compile-time only - does nothing at run time</span>
+<span class="ty">Connection</span> c = DriverManager.<span class="fn">getConnection</span>(url);    <span class="cmt">// the driver never registered itself</span></code></pre>
+
+      <p>The driver registers itself with <code>DriverManager</code> from inside its own static block, so it only works once the driver class has <em>initialized</em> — and an import never initializes anything. The historical cure is the line that looks like superstition in every old tutorial: <code>Class.forName("com.mysql.cj.jdbc.Driver");</code>, which forces initialization by name. (Modern drivers are found automatically — see Section 5 — but now you know why that line ever existed.)</p>
 
       <details class="check">
         <summary>Does <code>List&lt;Config&gt; list = new ArrayList&lt;&gt;();</code> initialize <code>Config</code>?</summary>
@@ -1004,7 +1034,7 @@ java -verbose:class -cp target/classes com.corejava.jvm.experiments.ClassLoading
         <li><strong>Confusing <code>ClassNotFoundException</code> with <code>NoClassDefFoundError</code>.</strong> They come from different places and mean different things: the first is a failed lookup <em>by name</em> (reflection, configuration, a framework), the second is a failed <em>resolution</em> of something your compiled code already refers to. <em>Avoid it:</em> ask “did anyone type this class's name as a string?” If yes, it is a name problem. If no, it is a packaging problem — something on the compile class path is missing from the runtime class path.</li>
         <li><strong>Expecting a changed <code>public static final</code> constant to reach callers.</strong> It was inlined into their class files at their compile time. <em>Avoid it:</em> in a library API, expose changeable values through a method or a non-constant field; when a constant must change, rebuild every consumer from clean rather than incrementally.</li>
         <li><strong>Assuming <code>Class.forName</code> and <code>loader.loadClass</code> are interchangeable.</strong> The first initializes; the second does not. Swapping one for the other silently stops a driver registering, a plugin self-installing, or a static cache filling — with no error at all, just behaviour that quietly does not happen. <em>Avoid it:</em> choose deliberately, and remember the three-argument <code>Class.forName(name, false, loader)</code> when you want to inspect a class without waking it.</li>
-        <li><strong>Doing anything in a <code>static</code> block that can fail, block, or need configuring</strong> — reading a file, opening a connection. You cannot control when it runs, cannot retry it, cannot test it in isolation, and its failure destroys the class for the rest of the process (the first caller sees <code>ExceptionInInitializerError</code>; everyone after sees the useless <code>Could not initialize class</code>). <em>Avoid it:</em> keep <code>&lt;clinit&gt;</code> to assignments of things that cannot throw. Anything else goes in an explicit method the caller invokes.</li>
+        <li><strong>Putting the same class on the class path twice and expecting a predictable winner.</strong> The class path is searched in order, so the first copy does win — but which copy is first depends on the order your build tool happened to produce, which can change when you add an unrelated dependency. <em>Avoid it:</em> treat a duplicated class as a bug to remove (Maven's dependency tree shows where each copy comes from), not an ordering to tune.</li>
         <li><strong>Writing a custom class loader for a problem that is not a class-loading problem.</strong> Custom loaders are right for exactly two jobs: isolation (plugins that must not see each other) and reloading. “Two libraries want different versions of a third” is a dependency problem with a build-file fix. And every custom loader risks a <strong>class loader leak</strong>: one lingering reference — a <code>ThreadLocal</code>, a static registry entry — keeps the loader and every class it defined alive, so each redeploy leaks a whole copy of the application. <em>Avoid it:</em> do not write one unless the problem is genuinely isolation or reloading. Lesson 07 shows what a leak looks like in a heap dump.</li>
       </ul>
     </section>
