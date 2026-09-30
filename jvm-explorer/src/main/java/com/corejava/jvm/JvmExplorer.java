@@ -11,6 +11,11 @@ import com.corejava.jvm.loading.ClassLoaderReporter;
 import com.corejava.jvm.loading.ConstantHolder;
 import com.corejava.jvm.loading.InitializationLog;
 import com.corejava.jvm.loading.LazyHolder;
+// Lesson 03's modules: where everything the JVM makes actually lives, and what happens
+// at the two walls - the stack that runs out of frames and the heap that runs out of room.
+import com.corejava.jvm.memory.MemoryRegions;
+import com.corejava.jvm.memory.ReferenceDemo;
+import com.corejava.jvm.memory.StackDepthProbe;
 
 // The front door of jvm-explorer. Lesson by lesson this program will grow modules
 // that provoke the JVM (fill memory, trigger garbage collection, overflow the stack).
@@ -129,5 +134,31 @@ public final class JvmExplorer {
         // run first, so this is the line that finally wakes LazyHolder up.
         System.out.println("Static method call : " + LazyHolder.stamp());
         System.out.println("Initialized so far : " + InitializationLog.events());
+
+        // ---- Lesson 03: where all of this actually lives ----------------------
+        // Every class loaded above put a description of itself into Metaspace, and every
+        // object this program has created sits on the heap. Both are now measurable
+        // rather than theoretical, so we print the regions the JVM is currently using.
+        System.out.println();
+        System.out.println("--- runtime memory areas: heap, non-heap, Metaspace ---");
+        System.out.println(MemoryRegions.describe());
+
+        // A variable never holds an object; it holds a reference to one on the heap.
+        // Printing this report proves it: the same method call can change the caller's
+        // object and yet be unable to change the caller's variable.
+        System.out.println();
+        System.out.println("--- references: the variable is an arrow, the object is on the heap ---");
+        System.out.println(ReferenceDemo.describe());
+
+        // The stack is per thread and has a fixed size, so a chain of calls that never
+        // returns must eventually run out of frames. The probe provokes exactly that,
+        // catches the error, and reports how far it got - a number that will differ on
+        // every machine, and changes when you pass -Xss.
+        System.out.println();
+        System.out.println("--- the stack has a floor: how many frames fit? ---");
+        System.out.println("Frames before overflow : " + StackDepthProbe.measureMaxDepth());
+        System.out.println("Ended with             : " + StackDepthProbe.lastErrorType());
+        System.out.println("The heap's own wall is provoked separately: "
+                + "java -Xmx32m -cp target/classes com.corejava.jvm.experiments.MemoryLimitsExperiment --oom");
     }
 }

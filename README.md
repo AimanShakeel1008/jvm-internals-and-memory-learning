@@ -10,15 +10,19 @@ The course text is a self-contained HTML learning system — open **[`lessons/in
 
 `jvm-explorer/` is a Maven project built to provoke and observe the JVM itself. Lesson by lesson it gains modules that fill heap regions on purpose, trigger and parse GC logs, watch classes load, overflow the stack on demand, and expose JIT behavior.
 
-**Current capabilities (after Lesson 02):**
+**Current capabilities (after Lesson 03):**
 
 - Self-inspection: prints the running JVM's Java version, JVM name (HotSpot), vendor, maximum heap size, and CPU core count.
 - Class file inspection: reads any loaded class's own `.class` bytes off the class path and decodes the eight-byte header — magic number, minor version, and major version turned into a Java release name.
 - Disassembly subjects: four deliberately tiny methods (`BytecodeSubject`) built to be read with `javap -c -p`.
 - Class loader reporting: for any class, names the loader that defined it and the full parent chain up to the bootstrap loader.
 - Lazy-initialization demonstration: a witness log records which classes have run their static initializer, showing live that reading a compile-time constant wakes nothing while a static method call wakes its class.
-- Experiments (labelled for-learning-only): a JIT warm-up stopwatch, and a class-loading experiment whose markers line up against the JVM's own `-verbose:class` output.
-- Tests: the build fails loudly if the running JVM is not the pinned Java 21, if class files are not compiled to Java 21, if the two disagree, or if any class-initialization rule stops holding.
+- Memory region reporting: prints the heap's ceiling, committed size and used size, total non-heap usage, Metaspace usage, and how many classes are currently loaded.
+- Reference semantics demonstration: shows live that a method can change the object it was handed but never the caller's variable, that two names can share one object, and that a copy is a separate object.
+- Stack depth probe: overflows one thread's stack on purpose, catches the error, and reports how many frames fitted — with a fatter-framed variant for comparison.
+- Heap filler: allocates and retains memory either safely up to a budget or, on explicit request, until the JVM throws `OutOfMemoryError` — then releases everything and reports the exact message.
+- Experiments (labelled for-learning-only): a JIT warm-up stopwatch, a class-loading experiment whose markers line up against the JVM's own `-verbose:class` output, and a memory-limits experiment that walks up to both the stack wall and the heap wall.
+- Tests: 55 JUnit tests. The build fails loudly if the running JVM is not the pinned Java 21, if class files are not compiled to Java 21, if the two disagree, if any class-initialization rule stops holding, or if the reference and memory-reporting rules stop holding.
 
 ## Requirements (pinned for the whole series)
 
@@ -47,7 +51,14 @@ javap -v target/classes/com/corejava/jvm/BytecodeSubject.class
 # watch the JVM load classes, in a clean JVM (not Maven's) — after mvn compile
 java -cp target/classes com.corejava.jvm.experiments.ClassLoadingExperiment
 java -verbose:class -cp target/classes com.corejava.jvm.experiments.ClassLoadingExperiment
+
+# walk up to the JVM's two memory walls — flags only apply in a clean JVM, so compile first
+java -cp target/classes com.corejava.jvm.experiments.MemoryLimitsExperiment
+java -Xss256k -cp target/classes com.corejava.jvm.experiments.MemoryLimitsExperiment
+java -Xmx32m -cp target/classes com.corejava.jvm.experiments.MemoryLimitsExperiment --oom
 ```
+
+The last command deliberately exhausts the heap and prints the resulting `OutOfMemoryError`. That is the intended outcome, not a bug — nothing else in the project does it, and no test ever does.
 
 ## Repository layout
 

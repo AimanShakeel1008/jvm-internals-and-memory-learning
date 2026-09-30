@@ -173,3 +173,48 @@ Decodes the errors this course's setup and lessons are likely to produce, with t
 ### A stray `>>> LateComer's static initializer is running NOW` line in the test output
 
 **Not an error.** That is the experiment's nested class printing from inside its own `<clinit>` during the test that calls its static method.
+
+## Lesson 03 — memory area errors
+
+### `java.lang.StackOverflowError`, with the same line repeated hundreds of times
+
+**What it means:** one thread's stack ran out of room for another frame. The heap is not involved.
+**Fix:** read the repeated part of the trace, because it *is* the diagnosis. One method repeating = a missing or unreachable base case. A short cycle (`a → b → c → a`) = mutual recursion, often two `toString` methods calling each other or a cyclic object graph. A thousand *different* frames = legitimately deep recursion, so either raise `-Xss` (per thread — see the almanac) or rewrite the algorithm with an explicit list instead of the call stack. Raising `-Xmx` does nothing at all here.
+
+### `java.lang.OutOfMemoryError: Java heap space`
+
+**What it means:** the heap reached its ceiling and the collector could not reclaim enough to satisfy the next allocation. It means something is *retaining* objects, not merely allocating them.
+**Fix:** for `jvm-explorer`, this is expected when you run `MemoryLimitsExperiment --oom` — that is the lesson. Anywhere else, find what still holds the objects (a static collection, a cache with no eviction, a listener never removed) and release it. Run with `-XX:+HeapDumpOnOutOfMemoryError` and read the dump (Lesson 07). Raising `-Xmx` without finding the retention just moves the crash later.
+
+### `java.lang.OutOfMemoryError: Metaspace`
+
+**What it means:** class metadata filled, not the object heap. Far too many classes are loaded.
+**Fix:** look for repeated redeploys without a restart, a class loader leak (Lesson 02), or a framework generating proxy classes without bound. `-Xmx` cannot help — it sizes a different region, and raising it leaves *less* native memory for Metaspace.
+
+### `java.lang.OutOfMemoryError: unable to create native thread`
+
+**What it means:** the JVM asked the operating system for a thread and was refused — an OS limit, or not enough native memory left for another stack.
+**Fix:** count the threads and find the leak (an executor created per request, a pool never closed). Note the trap: raising `-Xmx` makes this **worse**, because the heap takes memory the thread stacks needed.
+
+### `Unrecognized VM option 'MaxPermSize'` or `-XX:MaxPermSize` is ignored with a warning
+
+**What it means:** PermGen was removed in Java 8 and replaced by Metaspace, so the flag no longer exists.
+**Fix:** delete it from the startup script. If you wanted a ceiling on class metadata, the modern flag is `-XX:MaxMetaspaceSize`.
+
+### `-Xmx32m` or `-Xss256k` seems to have no effect with `mvn exec:java`
+
+**What it means:** `exec:java` runs your `main` inside **Maven's** JVM, which was already started with Maven's own settings — your flags never reach it.
+**Fix:** `mvn compile` first, then run a clean JVM you control, with the flags on that command:
+`java -Xmx32m -cp target/classes com.corejava.jvm.experiments.MemoryLimitsExperiment --oom`
+
+### The frame count from `StackDepthProbe` differs every time I run it
+
+**Not an error.** The number depends on the stack size the JVM chose, the frame layout on your processor, how much was already on the stack when the probe started, and whether the JIT has compiled the recursive method yet. Expect the same order of magnitude, not the same number. This is why the tests assert "more than a thousand frames" rather than an exact depth.
+
+### `MemoryRegionsTest` reports Metaspace as absent
+
+**Not an error, and the test still passes.** `Metaspace` is a HotSpot pool name, not something the Java specification guarantees, so `metaspaceUsedBytes()` returns an empty `OptionalLong` on a JVM that names its pools differently and the report says so in words. If you see this on a standard Temurin JDK 21, that *is* surprising — tell me what `mvn compile exec:java` printed.
+
+### Used heap did not drop after the filler released its 8 MB
+
+**Not an error.** Dropping a reference makes an object *eligible* for collection; it does not collect it. The number moves when the collector next runs, which is its decision, not yours. This is exactly the behaviour Lesson 04 explains.

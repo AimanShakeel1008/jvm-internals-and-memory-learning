@@ -1,0 +1,940 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lesson 03 — Runtime Memory Areas · JVM Internals &amp; Memory</title>
+  <link rel="stylesheet" href="../../assets/lesson.css">
+</head>
+<body>
+<div class="page">
+
+  <!-- ============================ TOC SIDEBAR ============================ -->
+  <aside class="toc">
+    <p class="toc-title">On this page</p>
+    <ol>
+      <li><a href="#s1">1 · The pain</a></li>
+      <li><a href="#s2">2 · Real-world analogy</a></li>
+      <li><a href="#s3">3 · The concept</a></li>
+      <li><a href="#s4">4 · Applied to jvm-explorer</a></li>
+      <li><a href="#s5">5 · In the wild</a></li>
+      <li><a href="#s6">6 · Gotchas</a></li>
+      <li><a href="#s7">7 · Key takeaways</a></li>
+      <li><a href="#s8">8 · Challenge</a></li>
+      <li><a href="#s9">9 · Almanac update</a></li>
+      <li><a href="#s10">10 · What is next</a></li>
+    </ol>
+    <nav class="toc-nav" aria-label="Course navigation">
+      <a class="navcard" href="../../phase-1-foundations/chapter-01-how-java-runs/lesson-02-class-loading.html">
+        <span class="navkicker">← Prev · Lesson 02</span>
+        <span class="navtitle">Class Loading</span>
+      </a>
+      <a class="navmap" href="../../index.html">↑ Course map</a>
+      <span class="navcard disabled">
+        <span class="navkicker">Next · Lesson 04 →</span>
+        <span class="navtitle">Object lifecycle &amp; GC fundamentals</span>
+        <span class="navnote">not yet written</span>
+      </span>
+    </nav>
+  </aside>
+
+  <!-- ============================ MAIN CONTENT ============================ -->
+  <main>
+
+    <header class="banner">
+      <p class="kicker">Core Java · Course 01 · JVM Internals &amp; Memory</p>
+      <h1>Lesson 03 — Runtime Memory Areas</h1>
+      <p class="subtitle">Where a running program actually puts things: the per-thread stack of frames, the one shared heap of objects, and the Metaspace full of class descriptions — plus the two walls the JVM hits when either runs out.</p>
+      <p class="meta">
+        <strong>Position:</strong> Lesson 03 of 07 &nbsp;·&nbsp;
+        <strong>Prerequisites:</strong> <a href="../../phase-1-foundations/chapter-01-how-java-runs/lesson-01-how-java-runs.html">Lesson 01</a>, <a href="../../phase-1-foundations/chapter-01-how-java-runs/lesson-02-class-loading.html">Lesson 02</a> &nbsp;·&nbsp;
+        <strong>Project files:</strong> <code>memory/HeapSnapshot.java</code>, <code>memory/MemoryRegions.java</code>, <code>memory/StackDepthProbe.java</code>, <code>memory/HeapFiller.java</code>, <code>memory/ReferenceDemo.java</code>, <code>experiments/MemoryLimitsExperiment.java</code>, <code>JvmExplorer.java</code> (modified), and five test classes
+      </p>
+    </header>
+
+    <!-- ===================== SECTION 1 — THE PAIN ===================== -->
+    <section id="s1">
+      <h2><span class="sec-num">1</span> The pain</h2>
+
+      <p>Here is a bug that has cost more hours than it has any right to. A method is supposed to fill in a customer's address, and half of it silently vanishes.</p>
+
+      <pre class="code"><code><span class="kw">void</span> <span class="fn">enrich</span>(<span class="ty">Customer</span> c) {
+    c.<span class="fn">setCity</span>(<span class="str">"Berlin"</span>);       <span class="cmt">// the caller DOES see this</span>
+    c = <span class="kw">new</span> <span class="ty">Customer</span>();        <span class="cmt">// from here on, the caller sees NOTHING</span>
+    c.<span class="fn">setCountry</span>(<span class="str">"Germany"</span>);   <span class="cmt">// lost, silently, every time</span>
+}</code></pre>
+
+      <p>The city arrives. The country does not. No exception, no warning, no log line — just a field that is stubbornly <code>null</code> in production. People explain it to each other with half-remembered phrases: <em>“Java is pass-by-reference, except sometimes.”</em> It is not, and there is no sometimes. There is one rule, it is simple, and it is a rule about <strong>where things live</strong> — which is exactly what this lesson is about.</p>
+
+      <p><strong>The second pain arrives at 3 a.m. as a one-line email:</strong> <code>java.lang.OutOfMemoryError: Java heap space</code>. Somebody suggests adding RAM to the server. Somebody else suggests <code>-Xmx8g</code>. Nobody can say what the heap <em>is</em>, so nobody can say whether either suggestion is a fix or just a way to make the same crash take longer to arrive. Worse, next week's reads <code>OutOfMemoryError: Metaspace</code> — a different region, with a different cause, that more heap cannot help at all. Those words are not interchangeable, and treating them as “the memory error” is how teams end up restarting a server nightly for two years.</p>
+
+      <p><strong>The third pain is a stack trace a thousand lines long, all the same line.</strong> <code>StackOverflowError</code>, then <code>at com.acme.Node.total(Node.java:41)</code> repeated until the console gives up. It is not an <code>OutOfMemoryError</code>, even though something clearly ran out of space. It does not involve the heap, even though everyone's first instinct is to raise <code>-Xmx</code>. The dial that actually moves it is a flag most developers have never typed. By the end of this lesson your project will report every region the JVM is using, walk up to both walls on purpose, and read the sign on each one.</p>
+    </section>
+
+    <!-- ===================== SECTION 2 — ANALOGY ===================== -->
+    <section id="s2">
+      <h2><span class="sec-num">2</span> Real-world analogy</h2>
+
+      <p>Picture a furniture workshop. Three places hold things, and each has its own rules.</p>
+
+      <p><strong>The workbench</strong> is where one carpenter does the job in front of them: the measurements for <em>this</em> cut, a pencil, the piece in progress. When a job needs a sub-job — “first make the drawer” — a fresh tray of notes and tools is stacked on the bench, used, and lifted off the instant the drawer is done. Everything on that tray goes with it. The bench is narrow: stack too many trays and the pile topples.</p>
+
+      <p><strong>The warehouse</strong> out the back holds the finished pieces: tables, chairs, drawers. It is large, it is shared by every carpenter in the shop, and nothing is thrown out just because one carpenter finished a job. What a carpenter keeps on the bench is not the table — it is a <em>docket</em> with a shelf number written on it. Two carpenters can hold dockets bearing the same shelf number, and then they are both talking about one table.</p>
+
+      <p><strong>The blueprint cabinet</strong> in the office holds one drawing per kind of furniture: what a “chair” is, how many legs it has, how to assemble one. There is exactly one chair blueprint no matter how many chairs exist. Nobody sits on a blueprint; you build from it.</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>The workshop</th><th>The JVM</th></tr></thead>
+          <tbody>
+            <tr><td>One workbench per carpenter</td><td>One <strong>stack</strong> per thread — never shared</td></tr>
+            <tr><td>A tray stacked on the bench for one sub-job</td><td>A <strong>frame</strong> — one method call's private space</td></tr>
+            <tr><td>The tray is lifted off the moment the sub-job ends</td><td>The frame is popped the moment the method returns</td></tr>
+            <tr><td>Too many trays and the pile topples</td><td><code>StackOverflowError</code></td></tr>
+            <tr><td>The shared warehouse of finished pieces</td><td>The <strong>heap</strong> — every object made with <code>new</code></td></tr>
+            <tr><td>A docket with a shelf number, not the table itself</td><td>A <strong>reference</strong> — the variable holds an address, not the object</td></tr>
+            <tr><td>Two dockets, one shelf number</td><td>Two variables pointing at one object</td></tr>
+            <tr><td>The warehouse is full and nothing may be thrown out</td><td><code>OutOfMemoryError: Java heap space</code></td></tr>
+            <tr><td>The blueprint cabinet, one drawing per kind</td><td><strong>Metaspace</strong> — one description per loaded class</td></tr>
+            <tr><td>Too many blueprints for the cabinet</td><td><code>OutOfMemoryError: Metaspace</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>Now re-read the bug from Section 1 with dockets in mind. <code>enrich</code> was handed <em>a photocopy of the docket</em>. Writing on the table that the docket names — <code>setCity</code> — changes the real table in the warehouse, and everybody sees it. Throwing the photocopy away and writing a different shelf number on it — <code>c = new Customer()</code> — changes nothing about the caller's docket, which is still in the caller's hand with the original number on it. One rule, two outcomes, no exceptions.</p>
+    </section>
+
+    <!-- ===================== SECTION 3 — CONCEPT ===================== -->
+    <section id="s3">
+      <h2><span class="sec-num">3</span> The concept explained</h2>
+
+      <p>We build the map in dependency order: what a running program must keep somewhere, the per-thread stack, the shared heap, the one rule that connects them, where the classes from <a href="../../phase-1-foundations/chapter-01-how-java-runs/lesson-02-class-loading.html">Lesson 02</a> ended up, the smaller regions nobody mentions, and finally what happens when each region fills.</p>
+
+      <h3>3.1 Two kinds of memory, because there are two kinds of question</h3>
+
+      <p>A running program constantly answers two different questions, and they want opposite things from memory.</p>
+
+      <p>The first is <em>“where am I in the work?”</em> — which method is running, what were its arguments, what is the value of its loop counter right now, and where do I return to when I finish. This information has a perfectly predictable lifetime: it is born when a method is called and dies when that method returns, in exactly reverse order. Nothing needs to be searched for and nothing needs to be cleaned up later. That question is answered by the <strong>stack</strong>.</p>
+
+      <p>The second is <em>“what data exists?”</em> — the customer object, the list of orders, the string you built. This has an unpredictable lifetime: an object created inside a method may be returned, stored in a field, handed to another thread, and still be in use an hour later. Nothing about the method's return tells you whether the object is finished with. That question is answered by the <strong>heap</strong>.</p>
+
+      <p>Because the lifetimes differ, the management differs. Stack memory is reclaimed for free and instantly, by arithmetic. Heap memory needs someone to work out what is still wanted — which is garbage collection, the subject of Lessons 04 and 05. Every memory decision in Java flows from this split.</p>
+
+      <p>Here is the whole map before we take it apart. Notice what is per-thread and what is shared, because that single distinction explains most of the rules that follow.</p>
+
+      <figure class="fig">
+        <svg viewBox="0 0 720 420" role="img" aria-label="The memory of one JVM process. On the left, per-thread areas: each thread has its own stack of frames, a program counter, and a native method stack. On the right, areas shared by all threads: the heap holding every object, Metaspace holding one description per loaded class, and the code cache holding JIT-compiled machine code.">
+          <defs>
+            <marker id="l3ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path class="fig-arrow-h" d="M0,0 L10,5 L0,10 z"/>
+            </marker>
+            <marker id="l3aa" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path class="fig-arrow-accent-h" d="M0,0 L10,5 L0,10 z"/>
+            </marker>
+          </defs>
+
+          <text class="fig-heading" x="360" y="22" text-anchor="middle">one JVM process</text>
+
+          <!-- per-thread column -->
+          <rect class="fig-box" x="12" y="38" width="320" height="366" rx="14"/>
+          <text class="fig-label" x="172" y="62" text-anchor="middle">PER THREAD — one set each</text>
+
+          <rect class="fig-code" x="30" y="78" width="130" height="180" rx="10"/>
+          <text class="fig-label" x="95" y="100" text-anchor="middle">thread 1 stack</text>
+          <rect class="fig-generic" x="42" y="112" width="106" height="30" rx="6"/>
+          <text class="fig-small" x="95" y="131" text-anchor="middle">frame: main</text>
+          <rect class="fig-generic" x="42" y="148" width="106" height="30" rx="6"/>
+          <text class="fig-small" x="95" y="167" text-anchor="middle">frame: total</text>
+          <rect class="fig-generic" x="42" y="184" width="106" height="30" rx="6"/>
+          <text class="fig-small" x="95" y="203" text-anchor="middle">frame: sum</text>
+          <text class="fig-small" x="95" y="238" text-anchor="middle">grows / shrinks</text>
+
+          <rect class="fig-code" x="184" y="78" width="130" height="180" rx="10"/>
+          <text class="fig-label" x="249" y="100" text-anchor="middle">thread 2 stack</text>
+          <rect class="fig-generic" x="196" y="112" width="106" height="30" rx="6"/>
+          <text class="fig-small" x="249" y="131" text-anchor="middle">frame: run</text>
+          <rect class="fig-generic" x="196" y="148" width="106" height="30" rx="6"/>
+          <text class="fig-small" x="249" y="167" text-anchor="middle">frame: poll</text>
+          <text class="fig-small" x="249" y="202" text-anchor="middle">completely</text>
+          <text class="fig-small" x="249" y="220" text-anchor="middle">separate</text>
+
+          <rect class="fig-generic" x="30" y="274" width="284" height="42" rx="9"/>
+          <text class="fig-small" x="172" y="292" text-anchor="middle">PC register — the address of the instruction</text>
+          <text class="fig-small" x="172" y="308" text-anchor="middle">this thread is executing right now</text>
+
+          <rect class="fig-generic" x="30" y="330" width="284" height="42" rx="9"/>
+          <text class="fig-small" x="172" y="348" text-anchor="middle">native method stack — for calls that leave</text>
+          <text class="fig-small" x="172" y="364" text-anchor="middle">Java for C/C++ code inside the JVM</text>
+
+          <!-- shared column -->
+          <rect class="fig-box" x="352" y="38" width="356" height="366" rx="14"/>
+          <text class="fig-label" x="530" y="62" text-anchor="middle">SHARED — one for the whole JVM</text>
+
+          <rect class="fig-infra" x="370" y="78" width="320" height="130" rx="10"/>
+          <text class="fig-label" x="530" y="102" text-anchor="middle">HEAP</text>
+          <text class="fig-small" x="530" y="122" text-anchor="middle">every object and array made with new</text>
+          <circle class="fig-accent2" cx="420" cy="152" r="14"/>
+          <circle class="fig-accent2" cx="470" cy="168" r="18"/>
+          <circle class="fig-accent2" cx="530" cy="148" r="11"/>
+          <circle class="fig-accent2" cx="580" cy="172" r="16"/>
+          <circle class="fig-accent2" cx="635" cy="150" r="13"/>
+          <text class="fig-small" x="530" y="198" text-anchor="middle">garbage-collected — Lessons 04 and 05</text>
+
+          <rect class="fig-infra" x="370" y="224" width="320" height="76" rx="10"/>
+          <text class="fig-label" x="530" y="248" text-anchor="middle">METASPACE</text>
+          <text class="fig-small" x="530" y="268" text-anchor="middle">one description per loaded class: its</text>
+          <text class="fig-small" x="530" y="284" text-anchor="middle">bytecode, field and method tables</text>
+
+          <rect class="fig-infra" x="370" y="316" width="320" height="56" rx="10"/>
+          <text class="fig-label" x="530" y="340" text-anchor="middle">CODE CACHE</text>
+          <text class="fig-small" x="530" y="360" text-anchor="middle">machine code the JIT produced — Lesson 06</text>
+
+          <!-- a frame pointing into the heap -->
+          <path class="fig-arrow-accent" d="M150,167 L366,152" marker-end="url(#l3aa)"/>
+          <text class="fig-small" x="250" y="152" text-anchor="middle">a local variable holds an address</text>
+        </svg>
+        <figcaption><strong>Two columns, one process.</strong> Amber = per-thread, private, automatic. Teal = shared by every thread. Indigo circles = individual objects. The amber arrow is the whole of Section 3.4: a variable on a stack holds the <em>address</em> of an object that lives on the heap. Each thread's stack is untouchable by the others, which is why local variables are automatically thread-safe and heap objects are not.</figcaption>
+      </figure>
+
+      <h3>3.2 The stack: one pile of frames per thread</h3>
+
+      <p>A <strong>thread</strong> is one independent line of execution — one worker carrying out instructions in order. A plain Java program starts with one, called <code>main</code>, and may create more. Every thread gets its own <strong>stack</strong>: a region of memory it alone can touch, used as a pile.</p>
+
+      <p>Each time the thread calls a method, the JVM pushes a new <strong>frame</strong> onto that pile. A frame is a small block of working space belonging to exactly one in-progress method call, and it holds three things:</p>
+
+      <ul>
+        <li>the <strong>local variable table</strong> — the numbered slots holding the method's parameters and local variables. You met these in <a href="../../phase-1-foundations/chapter-01-how-java-runs/lesson-01-how-java-runs.html">Lesson 01</a>: your variable names became slot numbers at compile time, with slot 0 being <code>this</code> in an instance method;</li>
+        <li>the <strong>operand stack</strong> — the scratch space where bytecode instructions push and pop the values they are working on, also from Lesson 01;</li>
+        <li>the <strong>return address</strong> — where to carry on in the calling method once this one finishes.</li>
+      </ul>
+
+      <p>When the method returns, the frame is popped: the pointer marking the top of the stack simply moves back down, and every local variable in that frame is gone. No search, no bookkeeping, no collector. That is why stack memory costs essentially nothing to reclaim — it is one subtraction.</p>
+
+      <p>Two consequences follow immediately and are worth saying out loud.</p>
+
+      <p><strong>Local variables are automatically thread-safe.</strong> Not by luck and not by a rule someone enforces: a local variable lives in a frame, a frame lives on one thread's stack, and no other thread can reach that stack. Two threads running the same method at the same time each have their own frame, their own slots, their own values.</p>
+
+      <p><strong>The pile has a fixed size.</strong> It is chosen when the thread is created, and it does not grow on demand. So a chain of calls that never returns must eventually run out of room — which is the <code>StackOverflowError</code> of Section 3.7.</p>
+
+      <details class="check">
+        <summary>Two threads run the same method, which declares <code>int total = 0;</code>. How many <code>total</code> variables exist?</summary>
+        <div class="answer-body">Two — one per frame, one frame per thread, each on its own stack. Neither thread can see or corrupt the other's copy. This is why local variables never need <code>synchronized</code>, and it is the reason the standard advice “keep state local” actually works rather than merely sounding tidy.</div>
+      </details>
+
+      <h3>3.3 The heap: one shared pool of objects</h3>
+
+      <p>The <strong>heap</strong> is a single region shared by every thread in the JVM, and it holds exactly one kind of thing: <strong>objects</strong>. Every object created with <code>new</code> goes there. So does every array, because in Java an array <em>is</em> an object. So does every string literal, and every object the JDK creates on your behalf.</p>
+
+      <p>Why the name? “Heap” here is an old programming word for a pool of memory you can take pieces from in any order and give back in any order — a heap of material to cut from, as opposed to a neat pile. (It has nothing to do with the heap <em>data structure</em> used in priority queues, which is an unrelated use of the same word. Two meanings, one word, permanent confusion.)</p>
+
+      <p>Three properties of the heap decide almost everything in the rest of this course:</p>
+
+      <ul>
+        <li><strong>It is shared.</strong> Any thread holding a reference to an object can read and write it, which is why object state — unlike local variables — needs thinking about when threads are involved.</li>
+        <li><strong>It has a ceiling.</strong> The JVM may grow the heap up to a maximum, set by <code>-Xmx</code> or chosen for you from the machine's RAM. Hitting that ceiling with nothing reclaimable left is <code>OutOfMemoryError: Java heap space</code>.</li>
+        <li><strong>It is cleaned by the garbage collector.</strong> Nothing on the heap is freed by your code. An object survives exactly as long as some chain of references can reach it, and the collector reclaims the rest at times of its own choosing. That is Lesson 04.</li>
+      </ul>
+
+      <div class="callout note">
+        <p>“Every object lives on the heap” is the right model to hold, and there is one honest footnote: if the JIT compiler can prove that an object never escapes the method that created it, it may skip the heap allocation entirely and keep the object's fields in registers or in the frame. This is called <strong>escape analysis</strong>, it is an optimisation you cannot observe from Java, and it never changes program behaviour. Lesson 06 covers it. Until then: heap.</p>
+      </div>
+
+      <h3>3.4 The one rule: a variable is an arrow, not an object</h3>
+
+      <p>This is the section that pays for the whole lesson, so we start with the pain rather than the rule.</p>
+
+      <p><strong>What goes wrong without this.</strong> Here is the naive model almost everyone starts with — that a variable <em>contains</em> its object, the way a box contains a thing:</p>
+
+      <pre class="code"><code><span class="ty">StringBuilder</span> a = <span class="kw">new</span> <span class="ty">StringBuilder</span>(<span class="str">"hello"</span>);
+<span class="ty">StringBuilder</span> b = a;                <span class="cmt">// naive model: "b is a copy of a"</span>
+b.<span class="fn">append</span>(<span class="str">" world"</span>);                <span class="cmt">// naive model: "only b changes"</span>
+System.out.<span class="fn">println</span>(a);            <span class="cmt">// naive model predicts: hello</span></code></pre>
+
+      <p>It prints <code class="out">hello world</code>. The naive model is not slightly off; it predicts the opposite. And the same wrong model produces the Section 1 bug, the “why did my list change when I only changed the other list” bug, and the “I passed a copy, didn't I?” bug. One correction fixes all three.</p>
+
+      <p><strong>The rule.</strong> A variable whose type is a class, an interface or an array does not hold the object. It holds a <strong>reference</strong>: a value that identifies where the object lives on the heap. Think of it as an arrow, or the docket from Section 2. Assignment copies the arrow, never the object. Two arrows can point at one object.</p>
+
+      <p>Primitive types work differently and that difference is the whole contrast: there are exactly eight of them — <code>byte</code>, <code>short</code>, <code>int</code>, <code>long</code>, <code>float</code>, <code>double</code>, <code>char</code>, <code>boolean</code> — and a variable of a primitive type holds the value itself, right there in the frame's slot. No arrow, no heap, nothing shared.</p>
+
+      <figure class="fig">
+        <svg viewBox="0 0 720 300" role="img" aria-label="A stack frame holds slots. The slot for an int holds the number 3 directly. Two object-typed slots both hold arrows pointing at one StringBuilder object on the heap, while a third slot points at a second object. Changing the shared object is visible through both arrows.">
+          <defs>
+            <marker id="l3bh" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path class="fig-arrow-h" d="M0,0 L10,5 L0,10 z"/>
+            </marker>
+            <marker id="l3ba" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path class="fig-arrow-accent-h" d="M0,0 L10,5 L0,10 z"/>
+            </marker>
+          </defs>
+
+          <!-- frame -->
+          <rect class="fig-code" x="14" y="46" width="270" height="230" rx="12"/>
+          <text class="fig-label" x="149" y="72" text-anchor="middle">frame: one method call</text>
+          <text class="fig-small" x="149" y="90" text-anchor="middle">(on this thread's stack)</text>
+
+          <rect class="fig-generic" x="32" y="104" width="234" height="38" rx="8"/>
+          <text class="fig-mono" x="46" y="128">int count</text>
+          <text class="fig-mono" x="236" y="128" text-anchor="end">3</text>
+
+          <rect class="fig-generic" x="32" y="152" width="234" height="38" rx="8"/>
+          <text class="fig-mono" x="46" y="176">StringBuilder a</text>
+          <text class="fig-mono" x="236" y="176" text-anchor="end">●</text>
+
+          <rect class="fig-generic" x="32" y="200" width="234" height="38" rx="8"/>
+          <text class="fig-mono" x="46" y="224">StringBuilder b</text>
+          <text class="fig-mono" x="236" y="224" text-anchor="end">●</text>
+
+          <text class="fig-small" x="149" y="262" text-anchor="middle">the int holds a VALUE; the others hold ADDRESSES</text>
+
+          <!-- heap -->
+          <rect class="fig-infra" x="404" y="46" width="302" height="230" rx="12"/>
+          <text class="fig-label" x="555" y="72" text-anchor="middle">heap — shared by all threads</text>
+
+          <rect class="fig-accent2" x="430" y="110" width="250" height="66" rx="10"/>
+          <text class="fig-label" x="555" y="136" text-anchor="middle">StringBuilder object</text>
+          <text class="fig-mono" x="555" y="160" text-anchor="middle">"hello world"</text>
+
+          <rect class="fig-accent2" x="430" y="196" width="250" height="56" rx="10"/>
+          <text class="fig-small" x="555" y="218" text-anchor="middle">another object, reached by nobody</text>
+          <text class="fig-small" x="555" y="236" text-anchor="middle">→ collectable (Lesson 04)</text>
+
+          <!-- arrows: both a and b point at the SAME object -->
+          <path class="fig-arrow-accent" d="M288,168 L400,142" marker-end="url(#l3ba)"/>
+          <path class="fig-arrow-accent" d="M288,216 L400,152" marker-end="url(#l3ba)"/>
+          <text class="fig-small" x="344" y="196" text-anchor="middle">two arrows,</text>
+          <text class="fig-small" x="344" y="212" text-anchor="middle">one object</text>
+
+          <text class="fig-small" x="360" y="290" text-anchor="middle">b.append(" world") changes the one object — so a sees it too.</text>
+        </svg>
+        <figcaption><strong>The arrow, drawn.</strong> Amber = the frame on the stack; grey = its numbered slots; teal = the heap; indigo = objects. The <code>int</code> slot holds <code>3</code> itself. The two object slots hold addresses, and here they hold the <em>same</em> address — which is why a change made through one name is instantly visible through the other.</figcaption>
+      </figure>
+
+      <p><strong>Now the method-argument rule, which is just the same fact applied once more.</strong> Java is always <em>pass-by-value</em>: the callee gets a copy of what the caller had. For an <code>int</code>, that is a copy of the number. For an object type, that is a copy of the <em>arrow</em> — pointing at the very same object.</p>
+
+      <pre class="code"><code><span class="kw">void</span> <span class="fn">mutate</span>(<span class="ty">StringBuilder</span> text) {
+    text.<span class="fn">append</span>(<span class="str">"!"</span>);                       <span class="cmt">// follows the arrow → the caller's object changes</span>
+}
+
+<span class="kw">void</span> <span class="fn">reassign</span>(<span class="ty">StringBuilder</span> text) {
+    text = <span class="kw">new</span> <span class="ty">StringBuilder</span>(<span class="str">"other"</span>);      <span class="cmt">// overwrites THIS frame's slot only</span>
+    text.<span class="fn">append</span>(<span class="str">"!"</span>);                       <span class="cmt">// changes an object nobody else can reach</span>
+}</code></pre>
+
+      <p>Both methods look like they modify the argument. <code>mutate</code> modifies the <em>object</em>; <code>reassign</code> modifies the <em>variable</em>. Only the first survives the return, because the object is on the shared heap and the variable is in a frame that is about to be destroyed. That is the entire explanation of the Section 1 bug, and there is nothing else to it.</p>
+
+      <div class="callout warning">
+        <p>The phrase to retire for good: <em>“Java passes objects by reference.”</em> It is wrong, and it is wrong in a way that predicts the Section 1 bug incorrectly. Java passes <strong>references by value</strong>. Every argument, always, is copied — it is just that copying an arrow gives you a second arrow to the same thing.</p>
+      </div>
+
+      <details class="check">
+        <summary>After <code>int[] a = {1,2,3}; int[] b = a; b[0] = 99;</code> — what is <code>a[0]</code>?</summary>
+        <div class="answer-body"><code>99</code>. An array is an object, so <code>b = a</code> copied the arrow, not the array. There is one array on the heap with two names. To get a genuinely separate array you must make one: <code>int[] b = a.clone();</code> or <code>Arrays.copyOf(a, a.length)</code>.</div>
+      </details>
+
+      <h3>3.5 Metaspace, and what happened to PermGen</h3>
+
+      <p>Lesson 02 watched hundreds of classes load. Each one left something behind: a <strong>description</strong> of the class — its name, its superclass, its field layout, its method table, its constant pool, and the bytecode of each method. That description is not an object on the heap. It is the blueprint from Section 2, and since Java 8 it lives in a region called <strong>Metaspace</strong>.</p>
+
+      <p>One description per class, however many instances exist. A million <code>Customer</code> objects sit on the heap; the single description of what a <code>Customer</code> <em>is</em> sits in Metaspace.</p>
+
+      <p><strong>What goes wrong without this distinction.</strong> Before Java 8, class descriptions lived in a heap region called the <strong>permanent generation</strong> (“PermGen”), and it had a fixed maximum size set by <code>-XX:MaxPermSize</code>, defaulting to something small like 64 MB. Redeploy a web application a few times without restarting the server, and each redeploy created a new class loader defining a new copy of every class — the <em>class loader leak</em> from Lesson 02. PermGen filled up and the server died with:</p>
+
+      <pre class="terminal"><code>java.lang.OutOfMemoryError: PermGen space</code></pre>
+
+      <p>Java 8 removed PermGen entirely. Metaspace replaced it and is allocated from <strong>native memory</strong> — the memory the JVM requests directly from the operating system, outside the Java heap — and by default it is <em>unbounded</em>: it grows as long as the OS will supply memory. That trades a common, baffling crash for a rarer one: a genuine class-loader leak now consumes machine memory instead of hitting a small ceiling. You can restore a ceiling deliberately with <code>-XX:MaxMetaspaceSize</code>, and many teams do exactly that so a leak announces itself as <code>OutOfMemoryError: Metaspace</code> rather than as a server that slowly eats the machine.</p>
+
+      <div class="callout note">
+        <p>Two related moves often get mixed up with this one. <strong>Interned strings</strong> — the pool behind string literals — moved out of PermGen and onto the ordinary heap in <strong>Java 7</strong>, one release before PermGen itself was removed. And <code>-XX:MaxPermSize</code> on Java 8 or later is not an error you will notice: the JVM ignores it with a warning, which is why a startup script can carry it for years unquestioned.</p>
+      </div>
+
+      <div class="callout forlearning">
+        <p><strong>For learning only:</strong> a detail worth knowing but not worth relying on. In HotSpot, a class's <em>static fields</em> are not stored in Metaspace with the rest of the description — they live in the <code>java.lang.Class</code> object for that class, which is on the heap. So “class metadata is in Metaspace, static data is on the heap” is the accurate split for HotSpot today. This is an implementation choice, not a specification requirement; treat it as a fact about the JVM you are running, marked to verify against your JDK's documentation if it ever matters.</p>
+      </div>
+
+      <h3>3.6 The regions nobody mentions</h3>
+
+      <p>Three more areas exist, and knowing their names turns three otherwise baffling error messages into readable ones.</p>
+
+      <p><strong>The PC register.</strong> One per thread. “PC” stands for <em>program counter</em>, and it holds the address of the bytecode instruction that thread is executing right now. It is tiny and you will never interact with it — but it is what makes “each thread has its own place in the program” true.</p>
+
+      <p><strong>The native method stack.</strong> One per thread, alongside the Java stack. When Java code calls into code written in C or C++ — which the JDK does constantly, for file access, networking and timing — those calls need their own frames, in the form the C compiler expects. That is what this is.</p>
+
+      <p><strong>The code cache.</strong> Shared. When the JIT compiler turns a hot method into native machine code (<a href="../../phase-1-foundations/chapter-01-how-java-runs/lesson-01-how-java-runs.html">Lesson 01</a>, in depth in Lesson 06), the machine code has to live somewhere. It lives here. If this region fills, the JVM prints <code>CodeCache is full. Compiler has been disabled</code> and the application keeps running — correctly, but interpreted and therefore slow. An application that mysteriously loses performance hours into a run, with no code change and no GC problem, is the classic sighting.</p>
+
+      <p>And one non-region worth naming because it accounts for memory that no heap tool will show you: <strong>direct (off-heap) buffers</strong>, created by <code>ByteBuffer.allocateDirect</code> and used heavily by networking and I/O libraries. The bytes live in native memory; only a small Java object on the heap points at them. A process whose memory use far exceeds its heap, with a healthy-looking heap graph, is usually holding direct buffers — and exhausting them gives a third distinct message, <code>OutOfMemoryError: Direct buffer memory</code>.</p>
+
+      <h3>3.7 The two walls</h3>
+
+      <p>Each region has a limit, and the JVM says something different at each one. Confusing them is the single most expensive mistake in this lesson.</p>
+
+      <p><strong>Wall one: the stack runs out of frames.</strong> A thread's stack has a fixed size — typically around 512 KB to 1 MB on a 64-bit JVM, set by <code>-Xss</code>, and genuinely machine-dependent. Every call pushes a frame; nothing pops until a method returns. Recursion without a working base case therefore has exactly one possible ending:</p>
+
+      <pre class="code"><code><span class="kw">int</span> <span class="fn">total</span>(<span class="ty">Node</span> n) {
+    <span class="kw">return</span> n.value + <span class="fn">total</span>(n.next);   <span class="cmt">// no base case: never returns, always pushes</span>
+}</code></pre>
+
+      <pre class="terminal"><code>Exception in thread "main" java.lang.StackOverflowError
+        at com.acme.Node.total(Node.java:41)
+        at com.acme.Node.total(Node.java:41)
+        at com.acme.Node.total(Node.java:41)
+        <span class="cmt">... the same line, roughly a thousand more times</span></code></pre>
+
+      <p>Reading it: the repeated line <em>is</em> the diagnosis. If one method repeats, you have runaway recursion — find the missing base case. If a short group of methods repeats in a cycle (<code>a → b → c → a</code>), you have mutual recursion, often through a framework: two objects whose <code>toString</code> methods call each other, or a JPA entity graph with a cycle in it. If the trace shows a thousand <em>different</em> frames, the recursion is legitimate and too deep for the stack, and your options are a bigger <code>-Xss</code> or rewriting the algorithm with an explicit list instead of the call stack.</p>
+
+      <div class="callout warning">
+        <p><code>-Xss</code> is per thread, not global. Doubling it on a server with 500 threads asks the OS for an extra 500 × the increase. Raising it is a real fix for genuinely deep recursion and a terrible fix for a missing base case — that one just takes longer to crash.</p>
+      </div>
+
+      <p><strong>Wall two: the heap has no reclaimable space left.</strong> Note the careful wording. Running out of heap does not mean “you allocated a lot”; a program can allocate a terabyte in a 32 MB heap quite happily, as long as it stops using each piece. The error arrives only when the collector cannot find anything to reclaim and the ceiling has been reached — which means something is still <em>holding on</em>:</p>
+
+      <pre class="terminal"><code>Exception in thread "main" java.lang.OutOfMemoryError: Java heap space</code></pre>
+
+      <p>The words after the colon are the whole message. They name the region, and the region names the investigation:</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Message</th><th>What filled</th><th>Where to look first</th></tr></thead>
+          <tbody>
+            <tr><td><code>Java heap space</code></td><td>the object heap</td><td>something retains objects it no longer needs — a growing cache, a static collection, a listener never removed. Take a heap dump (Lesson 07)</td></tr>
+            <tr><td><code>Metaspace</code></td><td>class metadata</td><td>far too many classes loaded — repeated redeploys, a class-loader leak, or runaway dynamic proxy generation</td></tr>
+            <tr><td><code>GC overhead limit exceeded</code></td><td>nothing yet — the heap is nearly full</td><td>the same causes as <code>Java heap space</code>. It means the collector is spending almost all its time recovering almost nothing, and the JVM gave up early rather than crawl</td></tr>
+            <tr><td><code>Requested array size exceeds VM limit</code></td><td>nothing</td><td>a single array larger than the JVM allows (near <code>Integer.MAX_VALUE</code> elements). Usually a corrupt length or a bad calculation, not a memory shortage</td></tr>
+            <tr><td><code>Direct buffer memory</code></td><td>off-heap native memory</td><td>direct <code>ByteBuffer</code>s not being released; often an I/O or networking library's pool</td></tr>
+            <tr><td><code>unable to create native thread</code></td><td>OS memory or an OS limit</td><td>thread leak, or stacks too large. The Java heap is innocent — raising <code>-Xmx</code> makes it <em>worse</em></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout note">
+        <p>The two errors are not both “memory errors” in any useful sense. <code>StackOverflowError</code> is about one thread's fixed working space and is usually a logic bug; <code>OutOfMemoryError: Java heap space</code> is about shared object storage and is usually a retention bug. They are also both <code>Error</code>, not <code>Exception</code> — the JVM's way of saying “do not plan to recover from this.” The project's probes catch them anyway, deliberately and in a controlled way, which Section 4 explains carefully.</p>
+      </div>
+
+      <h3>3.8 Try it: where does each thing live?</h3>
+
+      <p>Everything below has been explained above — this just lets you check your model quickly. Pick a line of code and see which region it puts things in, and why. With JavaScript switched off you have missed nothing.</p>
+
+      <div class="sim">
+        <div class="sim-controls">
+          <div class="sim-group">
+            <span>Line of code</span>
+            <div>
+              <button type="button" class="sim-btn active" id="sim1-c0">int count = 3;</button>
+              <button type="button" class="sim-btn" id="sim1-c1">Point p = new Point(3,4);</button>
+              <button type="button" class="sim-btn" id="sim1-c2">int[] nums = new int[5];</button>
+              <button type="button" class="sim-btn" id="sim1-c3">a field: private int x;</button>
+              <button type="button" class="sim-btn" id="sim1-c4">String s = "hello";</button>
+              <button type="button" class="sim-btn" id="sim1-c5">static int total;</button>
+              <button type="button" class="sim-btn" id="sim1-c6">the method's own bytecode</button>
+            </div>
+          </div>
+        </div>
+        <div class="sim-console" id="sim1-out" aria-live="polite">Pick a line above to see where its parts live.</div>
+        <p class="sim-note">This is a <strong>model</strong> of the placement rules, not a measurement: it ignores escape analysis, compressed references, object headers and padding, and it assumes HotSpot. The real authority is your own machine — <code>mvn compile exec:java</code> prints this JVM's actual region sizes, and Lesson 07's heap dump shows individual objects. If the two ever disagree, the machine is right.</p>
+      </div>
+
+      <script>
+      (function () {
+        // Each case: the code, then one line per "part" of it and where that part lives.
+        var CASES = {
+          c0: {
+            code: 'int count = 3;',
+            parts: [
+              ['STACK', 'slot "count" in this frame holds the number 3 itself'],
+              ['—', 'nothing is created on the heap at all']
+            ],
+            note: 'A primitive local is the only case with no arrow anywhere.'
+          },
+          c1: {
+            code: 'Point p = new Point(3, 4);',
+            parts: [
+              ['HEAP', 'the Point object, holding its two int fields'],
+              ['STACK', 'slot "p" holds the ADDRESS of that object'],
+              ['METASPACE', 'the description of the class Point (loaded once)']
+            ],
+            note: 'The fields are ints, but they live inside the object, so they are on the heap.'
+          },
+          c2: {
+            code: 'int[] nums = new int[5];',
+            parts: [
+              ['HEAP', 'the array object: 5 int slots plus a header and its length'],
+              ['STACK', 'slot "nums" holds the address of the array'],
+              ['METASPACE', 'the description of the array type int[]']
+            ],
+            note: 'An array IS an object in Java. That is why arrays are shared by assignment too.'
+          },
+          c3: {
+            code: 'class Point { private int x; }',
+            parts: [
+              ['HEAP', 'x lives INSIDE each Point object, one copy per object'],
+              ['METASPACE', 'the description "Point has a field x of type int"'],
+              ['—', 'nothing on the stack: a field is not a local variable']
+            ],
+            note: 'A million Points means a million copies of x, and still one description.'
+          },
+          c4: {
+            code: 'String s = "hello";',
+            parts: [
+              ['HEAP', 'the String object — literals live in the string pool, on the heap since Java 7'],
+              ['STACK', 'slot "s" holds its address'],
+              ['METASPACE', 'the constant pool entry in the class file that names the literal']
+            ],
+            note: 'Two classes using the same literal share ONE String object from the pool.'
+          },
+          c5: {
+            code: 'class Counter { static int total; }',
+            parts: [
+              ['HEAP', 'in HotSpot, static fields live in the java.lang.Class object'],
+              ['METASPACE', 'the description "Counter declares a static field total"'],
+              ['—', 'one copy for the whole class, not one per object']
+            ],
+            note: 'Implementation detail, not a specification rule — see the callout in 3.5.'
+          },
+          c6: {
+            code: 'the compiled bytecode of a method',
+            parts: [
+              ['METASPACE', 'the bytecode, arriving when the class was loaded (Lesson 02)'],
+              ['CODE CACHE', 'later: the native machine code, once the JIT compiles it'],
+              ['—', 'never on the heap and never on a stack']
+            ],
+            note: 'Your instructions and your data live in different regions entirely.'
+          }
+        };
+
+        var IDS = ['c0', 'c1', 'c2', 'c3', 'c4', 'c5', 'c6'];
+        var current = 'c0';
+        var out = document.getElementById('sim1-out');
+
+        function pad(s, n) { s = String(s); while (s.length < n) { s = s + ' '; } return s; }
+        function ok(s)   { return '<span class="ok">' + s + '</span>'; }
+        function skip(s) { return '<span class="skip">' + s + '</span>'; }
+        function hi(s)   { return '<span class="hi">' + s + '</span>'; }
+
+        function render() {
+          var c = CASES[current];
+          var lines = [];
+          lines.push(hi(c.code));
+          lines.push('');
+          for (var i = 0; i < c.parts.length; i++) {
+            var region = c.parts[i][0];
+            var what = c.parts[i][1];
+            var label = pad(region, 12);
+            lines.push((region === '—' ? skip(label) : ok(label)) + ': ' + what);
+          }
+          lines.push('');
+          lines.push(skip(c.note));
+          out.innerHTML = lines.join('\n');
+        }
+
+        function select(id) {
+          current = id;
+          for (var i = 0; i < IDS.length; i++) {
+            var btn = document.getElementById('sim1-' + IDS[i]);
+            if (IDS[i] === id) { btn.classList.add('active'); } else { btn.classList.remove('active'); }
+          }
+          render();
+        }
+
+        for (var i = 0; i < IDS.length; i++) {
+          (function (id) {
+            document.getElementById('sim1-' + id).addEventListener('click', function () { select(id); });
+          })(IDS[i]);
+        }
+
+        render();
+      })();
+      </script>
+
+      <details class="check">
+        <summary>Your service dies with <code>OutOfMemoryError: Metaspace</code>. Would <code>-Xmx8g</code> help?</summary>
+        <div class="answer-body">No, and it may make things worse by leaving the operating system less memory for the native region Metaspace actually uses. <code>-Xmx</code> sizes the object heap; Metaspace is a different region holding class descriptions. The investigation is “why does this JVM have so many classes loaded?” — repeated redeployment, a class-loader leak (Lesson 02), or a framework generating proxy classes without bound.</div>
+      </details>
+    </section>
+
+    <!-- ===================== SECTION 4 — APPLIED ===================== -->
+    <section id="s4">
+      <h2><span class="sec-num">4</span> Applied to jvm-explorer</h2>
+
+      <p>Up to now this lesson has been a map. This section turns every region on it into a number your own machine produces, and walks the project up to both walls on purpose.</p>
+
+      <h3>4.1 What was added</h3>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>File</th><th>Its one job</th></tr></thead>
+          <tbody>
+            <tr><td><code>memory/HeapSnapshot.java</code></td><td>a record: one reading of the heap (max / committed / used) with the megabyte arithmetic</td></tr>
+            <tr><td><code>memory/MemoryRegions.java</code></td><td>asks the JVM for the heap, non-heap and Metaspace figures and the loaded-class count</td></tr>
+            <tr><td><code>memory/ReferenceDemo.java</code></td><td>proves Section 3.4: mutate versus reassign, aliasing versus copying</td></tr>
+            <tr><td><code>memory/StackDepthProbe.java</code></td><td>overflows the stack deliberately and counts the frames that fitted</td></tr>
+            <tr><td><code>memory/HeapFiller.java</code></td><td>fills the heap — safely up to a budget, or all the way to <code>OutOfMemoryError</code> on request</td></tr>
+            <tr><td><code>experiments/MemoryLimitsExperiment.java</code></td><td>a runnable tour of both walls; the fatal half only runs with <code>--oom</code></td></tr>
+            <tr><td><code>JvmExplorer.java</code> (modified)</td><td>a new section printing the regions, the reference report and the stack depth</td></tr>
+            <tr><td>five test classes</td><td>24 new JUnit tests, taking the project to <strong>55</strong></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>4.2 Reading the regions</h3>
+
+      <p>Two different doors lead to the same house. <code>Runtime</code> has answered heap questions since Java 1.0 and needs nothing extra. The <em>management</em> API — a set of objects the JVM keeps about itself, reachable through <code>ManagementFactory</code> — answers finer questions, including which named memory pools exist. We use both.</p>
+
+      <pre class="code"><code><span class="kw">public static</span> <span class="ty">HeapSnapshot</span> <span class="fn">heapSnapshot</span>() {
+    <span class="ty">Runtime</span> runtime = <span class="ty">Runtime</span>.<span class="fn">getRuntime</span>();
+
+    <span class="cmt">// The ceiling -Xmx sets, or a default derived from the machine's RAM.</span>
+    <span class="kw">long</span> max = runtime.<span class="fn">maxMemory</span>();
+
+    <span class="cmt">// What the JVM has actually taken from the OS so far. Read BEFORE freeMemory()</span>
+    <span class="cmt">// so the two readings are as close together in time as we can make them.</span>
+    <span class="kw">long</span> committed = runtime.<span class="fn">totalMemory</span>();
+    <span class="kw">long</span> free = runtime.<span class="fn">freeMemory</span>();
+
+    <span class="cmt">// used = committed - free, clamped: a garbage collection landing between the</span>
+    <span class="cmt">// two calls could otherwise produce a negative number. A reporting method</span>
+    <span class="cmt">// should never be the thing that throws.</span>
+    <span class="kw">long</span> used = <span class="ty">Math</span>.<span class="fn">min</span>(committed, <span class="ty">Math</span>.<span class="fn">max</span>(<span class="num">0L</span>, committed - free));
+
+    <span class="kw">return new</span> <span class="ty">HeapSnapshot</span>(max, committed, used);
+}</code></pre>
+
+      <p>Metaspace needs the other door, and needs care: “Metaspace” is a HotSpot pool name, not something the Java specification promises. So the method searches the pools by name and returns <code>OptionalLong</code> — “a number, or nothing” — rather than inventing <code>-1</code> as a secret code for absent:</p>
+
+      <pre class="code"><code><span class="kw">public static</span> <span class="ty">OptionalLong</span> <span class="fn">metaspaceUsedBytes</span>() {
+    <span class="cmt">// The pool list differs by JVM, by collector and by version, which is exactly</span>
+    <span class="cmt">// why we search it by name instead of indexing into it.</span>
+    <span class="kw">for</span> (<span class="ty">MemoryPoolMXBean</span> pool : <span class="ty">ManagementFactory</span>.<span class="fn">getMemoryPoolMXBeans</span>()) {
+        <span class="kw">if</span> (METASPACE_POOL_NAME.<span class="fn">equals</span>(pool.<span class="fn">getName</span>())) {
+            <span class="ty">MemoryUsage</span> usage = pool.<span class="fn">getUsage</span>();
+            <span class="kw">if</span> (usage != <span class="kw">null</span>) {
+                <span class="kw">return</span> <span class="ty">OptionalLong</span>.<span class="fn">of</span>(usage.<span class="fn">getUsed</span>());
+            }
+        }
+    }
+    <span class="cmt">// Empty means "this JVM did not offer that pool" - a different statement</span>
+    <span class="cmt">// from "zero bytes are in use".</span>
+    <span class="kw">return</span> <span class="ty">OptionalLong</span>.<span class="fn">empty</span>();
+}</code></pre>
+
+      <h3>4.3 Walking to wall one, on purpose</h3>
+
+      <p>There is no API that answers “how many frames fit on my stack”. The only honest way to find out is to fall off the end and count on the way down. The probe does exactly that:</p>
+
+      <pre class="code"><code><span class="cmt">// Lives OUTSIDE the recursion, because every local variable inside it dies with</span>
+<span class="cmt">// its frame as the stack unwinds - by the time we catch the error, they are gone.</span>
+<span class="kw">private static int</span> deepestReached;
+
+<span class="kw">public static int</span> <span class="fn">measureMaxDepth</span>() {
+    deepestReached = <span class="num">0</span>;
+    <span class="kw">try</span> {
+        <span class="fn">descend</span>(<span class="num">1</span>);                  <span class="cmt">// can only end by overflowing</span>
+    } <span class="kw">catch</span> (<span class="ty">StackOverflowError</span> expected) {
+        lastErrorType = expected.<span class="fn">getClass</span>().<span class="fn">getName</span>();
+    }
+    <span class="kw">return</span> deepestReached;
+}
+
+<span class="kw">private static void</span> <span class="fn">descend</span>(<span class="kw">int</span> depth) {
+    deepestReached = depth;          <span class="cmt">// record on the way DOWN - there is no way back up</span>
+    <span class="fn">descend</span>(depth + <span class="num">1</span>);
+}</code></pre>
+
+      <div class="callout warning">
+        <p><strong>Catching an <code>Error</code> is normally wrong, and this is the exception that proves the rule.</strong> An <code>Error</code> signals a condition you are not expected to recover from, so code that swallows one usually hides a disaster. Here the overflow <em>is</em> the measurement, it is provoked deliberately, and by the time the <code>catch</code> block runs the entire recursion has unwound — so the stack is empty again and there is plenty of room to do the counting. Copying this pattern into ordinary application code is a bug; the file says so in its own comments.</p>
+      </div>
+
+      <h3>4.4 Walking to wall two — carefully</h3>
+
+      <p>Allocating is not enough to exhaust a heap. A loop that creates a million arrays and forgets each one immediately runs forever in a tiny heap, because the collector reclaims each one as fast as it appears. To fill a heap you must <strong>keep</strong> what you allocate — which is also the exact definition of a memory leak: not allocating too much, but holding on to things you no longer need.</p>
+
+      <pre class="code"><code><span class="cmt">// The list is what keeps every chunk REACHABLE, and therefore uncollectable.</span>
+<span class="cmt">// Remove this list and the method allocates nothing that survives.</span>
+<span class="ty">List</span>&lt;<span class="kw">byte</span>[]&gt; retained = <span class="kw">new</span> <span class="ty">ArrayList</span>&lt;&gt;();
+<span class="kw">long</span> held = <span class="num">0</span>;
+
+<span class="cmt">// Stop when one MORE chunk would exceed the budget, so we never overshoot -</span>
+<span class="cmt">// which is what makes the chunk count exactly predictable in a test.</span>
+<span class="kw">while</span> (held + chunkBytes &lt;= budgetBytes) {
+    retained.<span class="fn">add</span>(<span class="kw">new byte</span>[chunkBytes]);
+    held += chunkBytes;
+}</code></pre>
+
+      <p>The fatal version has one subtlety that matters enormously in real code. When the <code>OutOfMemoryError</code> arrives, the very first thing the catch block does is let go of everything — <em>before</em> formatting any message:</p>
+
+      <pre class="code"><code>} <span class="kw">catch</span> (<span class="ty">OutOfMemoryError</span> expected) {
+    <span class="cmt">// Reporting an out-of-memory condition needs memory. If we still held the</span>
+    <span class="cmt">// heap hostage, the report itself would fail with a SECOND OutOfMemoryError.</span>
+    retained.<span class="fn">clear</span>();
+    retained = <span class="kw">null</span>;
+
+    <span class="ty">String</span> message = expected.<span class="fn">getMessage</span>();   <span class="cmt">// "Java heap space"</span>
+    <span class="kw">return new</span> <span class="ty">ExhaustionReport</span>(held, count, expected.<span class="fn">getClass</span>().<span class="fn">getName</span>(),
+            message == <span class="kw">null</span> ? <span class="str">"(no message)"</span> : message);
+}</code></pre>
+
+      <div class="callout note">
+        <p><code>fillUntilExhausted</code> is deliberately <strong>never called from a test</strong>. A JVM that has just run out of memory is in no state to run the tests that come after it, and a suite that sometimes dies halfway through teaches a team to ignore red builds. The tests check the safe method's arithmetic and the report's formatting; the exhaustion itself you run by hand, with a small <code>-Xmx</code>, where it is the entire point.</p>
+      </div>
+
+      <h3>4.5 What happens when it runs</h3>
+
+      <p>A numbered trace of <code>MemoryLimitsExperiment</code>, run with <code>--oom</code> and <code>-Xmx32m</code>:</p>
+
+      <ol>
+        <li>The JVM starts, loads the classes it needs (Lesson 02's machinery, unchanged), and calls <code>main</code>. A frame for <code>main</code> is pushed onto the main thread's stack.</li>
+        <li><code>MemoryRegions.describe()</code> asks <code>Runtime</code> for three numbers and the management API for two more, and prints one line per region. Used heap will be small — a few megabytes of JDK and project objects.</li>
+        <li><code>StackDepthProbe.measureMaxDepth()</code> resets its counter and calls <code>descend(1)</code>. Each call pushes a frame and writes its depth to the static field.</li>
+        <li>Somewhere in the tens of thousands of frames, the next push has nowhere to go. The JVM throws <code>StackOverflowError</code>, which unwinds every frame back to <code>measureMaxDepth</code>, where it is caught.</li>
+        <li>The method returns the last depth recorded before the fall. The stack is now empty again and the thread is perfectly healthy.</li>
+        <li>The fat-frame probe repeats the whole thing with four extra <code>long</code>s per frame. Prediction: a <em>smaller</em> number, because bigger frames mean fewer of them fit — but the JIT is free to lay out compiled frames differently, so your machine decides.</li>
+        <li><code>HeapFiller.fillUpTo</code> allocates eight 1 MB arrays and holds them in a list. Used heap climbs by roughly 8 MB.</li>
+        <li>The list is cleared, so all eight are now unreachable, and the snapshot printed afterwards may show used memory back down — or not, if no collection has happened yet. Both are correct; the collector runs when <em>it</em> decides, not when you stop using something.</li>
+        <li>Because <code>--oom</code> was passed, <code>fillUntilExhausted</code> starts allocating 1 MB chunks and keeping every one. In a 32 MB heap this takes well under a second.</li>
+        <li>The collector runs, finds nothing reclaimable (every chunk is in the list), the heap is at its ceiling, and the JVM throws <code>OutOfMemoryError: Java heap space</code>.</li>
+        <li>The catch block drops the list first, then builds the report, then prints it — and the program exits normally, having survived the thing that kills most programs.</li>
+      </ol>
+
+      <h3>4.6 Predicted output and the commands to break it</h3>
+
+      <p>First the regression check, which is the one command to run after every lesson:</p>
+
+      <pre class="terminal"><code><span class="cmt"># everything below runs from inside jvm-explorer/</span>
+mvn test</code></pre>
+
+      <pre class="terminal"><code><span class="cmt">// PREDICTED (trimmed; Surefire's class order may differ)</span>
+[INFO] Running com.corejava.jvm.memory.HeapFillerTest
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0
+[INFO] Running com.corejava.jvm.memory.MemoryRegionsTest
+[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0
+[INFO] Running com.corejava.jvm.memory.ReferenceDemoTest
+[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0
+[INFO] Running com.corejava.jvm.memory.StackDepthProbeTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0
+[INFO] Running com.corejava.jvm.experiments.MemoryLimitsExperimentTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0
+<span class="cmt">... and the seven test classes from Lessons 00-02, unchanged ...</span>
+[INFO] <span class="out">Tests run: 55, Failures: 0, Errors: 0, Skipped: 0</span>
+[INFO] BUILD SUCCESS</code></pre>
+
+      <div class="callout tryit">
+        <p>Run <code>mvn test</code> from <code>jvm-explorer/</code> and check the total matches the prediction above: <strong>55 tests, all green</strong>. If it does not, the machine is right — tell me what you saw and we will work out why.</p>
+      </div>
+
+      <p>Then the program itself. Every number below will differ on your machine — heap sizes come from your RAM, the frame count from your JDK build and processor:</p>
+
+      <pre class="terminal"><code>mvn compile exec:java</code></pre>
+
+      <pre class="terminal"><code><span class="cmt">// PREDICTED — the Lesson 03 section only; everything above it is unchanged</span>
+--- runtime memory areas: heap, non-heap, Metaspace ---
+heap: used 12 MB of 256 MB committed, ceiling 4096 MB (0.3% of ceiling)
+non-heap: 14 MB used (class metadata, JIT code cache, and more)
+Metaspace: 9 MB used, holding 1783 loaded classes
+
+--- references: the variable is an arrow, the object is on the heap ---
+after mutate + reassign, the caller sees: "original (changed inside mutate)"
+the second variable points at the same object: true
+a copy has equal text but is a different object: false
+the primitive the method reassigned is still: 1
+
+--- the stack has a floor: how many frames fit? ---
+Frames before overflow : 21874
+Ended with             : java.lang.StackOverflowError
+The heap's own wall is provoked separately: java -Xmx32m -cp target/classes com.corejava.jvm.experiments.MemoryLimitsExperiment --oom</code></pre>
+
+      <p>Read the reference block closely, because it is Section 3.4 in four lines. The caller's text <em>does</em> carry the change made by <code>mutate</code>; it does <em>not</em> carry the one made by <code>reassign</code>; the alias is the same object; the copy is not; and the primitive is untouched. That is the whole rule, demonstrated rather than asserted.</p>
+
+      <p>Now both walls, with a clean JVM rather than Maven's, so the flags actually apply to the program:</p>
+
+      <pre class="terminal"><code><span class="cmt"># compile once, then run a JVM you control</span>
+mvn compile
+
+<span class="cmt"># the safe half: regions, then the stack wall</span>
+java -cp target/classes com.corejava.jvm.experiments.MemoryLimitsExperiment
+
+<span class="cmt"># the same, with a deliberately tiny thread stack - watch the depth collapse</span>
+java -Xss256k -cp target/classes com.corejava.jvm.experiments.MemoryLimitsExperiment
+
+<span class="cmt"># the fatal half: a small heap, filled until the JVM refuses</span>
+java -Xmx32m -cp target/classes com.corejava.jvm.experiments.MemoryLimitsExperiment --oom</code></pre>
+
+      <pre class="terminal"><code><span class="cmt">// PREDICTED for the --oom run, with -Xmx32m</span>
+=== memory limits experiment: the two walls of a JVM ===
+
+-- regions, at startup --
+heap: used 3 MB of 32 MB committed, ceiling 32 MB (9.4% of ceiling)
+non-heap: 8 MB used (class metadata, JIT code cache, and more)
+Metaspace: 4 MB used, holding 812 loaded classes
+
+-- wall 1: the stack --
+plain frames reached depth : 21874
+caught                     : java.lang.StackOverflowError
+larger frames reached depth: 9611
+
+-- a safe fill: 8 MB held at once --
+allocated and released 8 chunks of 1 MB
+heap: used 11 MB of 32 MB committed, ceiling 32 MB (34.4% of ceiling)
+
+-- wall 2: the heap (this will end the program) --
+<span class="out">held 27 MB in 27 chunks before java.lang.OutOfMemoryError: Java heap space</span>
+The JVM survived because the filler let go of everything before reporting.</code></pre>
+
+      <div class="callout tryit">
+        <p>Run all four commands and compare. Three things are worth checking specifically: (1) does <code>-Xss256k</code> shrink the frame count, roughly in proportion? (2) is the fat-frame depth smaller than the plain one? (3) does the chunk count before <code>OutOfMemoryError</code> land a little under your <code>-Xmx</code>, not exactly on it? Every one of those numbers is your machine's to give, and if any of them contradicts the prediction, the machine wins — tell me what you saw.</p>
+      </div>
+
+      <p>The project compiles and stays green (predicted). Nothing from Lessons 00–02 was touched, which matters here: Lesson 02's demonstration classes prove that a class initializes <em>exactly once</em>, so any new code that woke one of them would silently destroy that proof.</p>
+    </section>
+
+    <!-- ===================== SECTION 5 — IN THE WILD ===================== -->
+    <section id="s5">
+      <h2><span class="sec-num">5</span> In the wild</h2>
+
+      <p>Open the JDK's own <code>java.lang.StringBuilder</code> and you find a class whose entire public contract depends on the rule in Section 3.4. Every mutating method — <code>append</code>, <code>insert</code>, <code>reverse</code>, <code>delete</code> — ends with <code>return this;</code>. Not a copy: <em>this</em>, the very same object, so that chained calls all operate on one object on the heap:</p>
+
+      <pre class="code"><code><span class="ty">StringBuilder</span> sb = <span class="kw">new</span> <span class="ty">StringBuilder</span>();
+sb.<span class="fn">append</span>(<span class="str">"a"</span>).<span class="fn">append</span>(<span class="str">"b"</span>).<span class="fn">append</span>(<span class="str">"c"</span>);   <span class="cmt">// one object, three visits</span></code></pre>
+
+      <p>Contrast it with <code>String</code>, whose methods return new objects and leave the original untouched — which is why <code>text.trim();</code> on a line by itself does nothing at all, a mistake every Java developer makes exactly once. Same language, same heap; opposite design, and the difference is entirely about whether the returned reference points at the old object or a new one.</p>
+
+      <div class="callout realworld">
+        <p><strong>In the real world,</strong> this is the interview question that separates recited answers from understood ones. “Is Java pass-by-value or pass-by-reference?” has a one-word correct answer — <em>by value, always</em> — but the follow-up is the real question: <em>then why did my object change?</em> Being able to answer with the stack slot, the copied arrow and the shared heap object, in that order, is the difference between having memorised a phrase and having a model. The same model is what lets you read a heap dump in Lesson 07 without it being a wall of noise.</p>
+      </div>
+    </section>
+
+    <!-- ===================== SECTION 6 — GOTCHAS ===================== -->
+    <section id="s6">
+      <h2><span class="sec-num">6</span> Gotchas and common mistakes</h2>
+
+      <ul>
+        <li><strong>Treating <code>StackOverflowError</code> as a memory shortage and raising <code>-Xmx</code>.</strong> People do this because both errors feel like “out of memory”, and the heap flag is the one they know. The heap is not involved. The flag that moves the stack is <code>-Xss</code>, and it is per thread — but before reaching for it, check the repeated line in the trace, because nine times out of ten the real bug is a missing base case and a bigger stack just delays the crash.</li>
+
+        <li><strong>Believing that dropping a reference frees memory immediately.</strong> Setting <code>x = null</code> makes an object <em>eligible</em> for collection; it does not collect it, and it does not return memory to the operating system. The used-heap figure may not move at all until the collector next runs. This is why the project's snapshot after releasing 8 MB may look identical to the one before — and why <code>System.gc()</code> is a request the JVM is free to ignore, not a command.</li>
+
+        <li><strong>Reading “used heap” as “memory my program needs”.</strong> Used heap includes garbage that has not been collected yet, so it routinely reads far higher than the live data. The number that matters for sizing is how much survives a full collection, which you will learn to read from GC logs in Lesson 05. Sizing a heap from a single <code>used</code> reading is guessing with extra steps.</li>
+
+        <li><strong>Assuming the same numbers on another machine.</strong> The default heap ceiling comes from the machine's RAM (roughly a quarter of it, though that is a default to verify, not a law); the default stack size differs by platform and JDK build; and inside a container the JVM reads the container's limits, not the host's — which is why a service that is fine on a laptop dies immediately in Kubernetes. Every number this lesson prints is an observation about one machine at one moment.</li>
+
+        <li><strong>Catching <code>OutOfMemoryError</code> in application code to “keep going”.</strong> The project catches it deliberately, in a tool whose whole purpose is to provoke it, after dropping every reference it held. Application code that catches it has almost always kept holding everything, so the very next allocation fails again — and the log line explaining it needs memory to build. The correct response to <code>OutOfMemoryError</code> in production is to let the JVM die and read the heap dump (Lesson 07), which is why <code>-XX:+HeapDumpOnOutOfMemoryError</code> exists.</li>
+      </ul>
+    </section>
+
+    <!-- ===================== SECTION 7 — TAKEAWAYS ===================== -->
+    <section id="s7">
+      <h2><span class="sec-num">7</span> Key takeaways</h2>
+
+      <ul>
+        <li>Each thread has its own stack of frames holding one method call's locals and working space, reclaimed instantly when the method returns — which is why local variables cost nothing and are automatically thread-safe.</li>
+        <li>Every object and array lives on the one shared heap, and a variable of an object type never holds the object itself: it holds a reference, an arrow to where the object lives.</li>
+        <li>Java passes every argument by value, including references — so a method can permanently change the object it was handed and can never change which object the caller's variable points at.</li>
+        <li>Class descriptions live in Metaspace, which replaced PermGen in Java 8, is taken from native memory, and is unbounded by default unless you set <code>-XX:MaxMetaspaceSize</code>.</li>
+        <li><code>StackOverflowError</code> and <code>OutOfMemoryError</code> name different regions with different causes and different fixes, and the words after the colon in an <code>OutOfMemoryError</code> are the most important part of the message.</li>
+      </ul>
+    </section>
+
+    <!-- ===================== SECTION 8 — CHALLENGE ===================== -->
+    <section id="s8">
+      <h2><span class="sec-num">8</span> Challenge</h2>
+
+      <p><strong>Part A — predict the output.</strong> Work through this line by line, drawing the frame and the heap as you go, and write down what each <code>println</code> prints <em>before</em> reading the answer.</p>
+
+      <pre class="code"><code><span class="kw">import</span> java.util.ArrayList;
+<span class="kw">import</span> java.util.List;
+
+<span class="kw">public class</span> <span class="ty">Puzzle</span> {
+
+    <span class="kw">static void</span> <span class="fn">addOne</span>(<span class="ty">List</span>&lt;<span class="ty">String</span>&gt; items) {
+        items.<span class="fn">add</span>(<span class="str">"added"</span>);
+    }
+
+    <span class="kw">static void</span> <span class="fn">replace</span>(<span class="ty">List</span>&lt;<span class="ty">String</span>&gt; items) {
+        items = <span class="kw">new</span> <span class="ty">ArrayList</span>&lt;&gt;();
+        items.<span class="fn">add</span>(<span class="str">"replaced"</span>);
+    }
+
+    <span class="kw">static void</span> <span class="fn">grow</span>(<span class="kw">int</span> n) {
+        n = n * <span class="num">10</span>;
+    }
+
+    <span class="kw">public static void</span> <span class="fn">main</span>(<span class="ty">String</span>[] args) {
+        <span class="ty">List</span>&lt;<span class="ty">String</span>&gt; a = <span class="kw">new</span> <span class="ty">ArrayList</span>&lt;&gt;();
+        <span class="ty">List</span>&lt;<span class="ty">String</span>&gt; b = a;
+        <span class="kw">int</span> size = <span class="num">1</span>;
+
+        <span class="fn">addOne</span>(a);
+        <span class="fn">replace</span>(a);
+        <span class="fn">grow</span>(size);
+        b.<span class="fn">add</span>(<span class="str">"via b"</span>);
+
+        System.out.<span class="fn">println</span>(<span class="str">"1: "</span> + a);
+        System.out.<span class="fn">println</span>(<span class="str">"2: "</span> + b);
+        System.out.<span class="fn">println</span>(<span class="str">"3: "</span> + (a == b));
+        System.out.<span class="fn">println</span>(<span class="str">"4: "</span> + size);
+        System.out.<span class="fn">println</span>(<span class="str">"5: "</span> + <span class="kw">new</span> <span class="ty">ArrayList</span>&lt;&gt;(a).<span class="fn">equals</span>(a));
+        System.out.<span class="fn">println</span>(<span class="str">"6: "</span> + (<span class="kw">new</span> <span class="ty">ArrayList</span>&lt;&gt;(a) == a));
+    }
+}</code></pre>
+
+      <p><strong>Part B — decode three incidents.</strong> For each, name the region involved and the first thing you would investigate:</p>
+
+      <ol>
+        <li>A batch job dies with <code>OutOfMemoryError: GC overhead limit exceeded</code> after four hours. Heap graphs show a sawtooth that climbs steadily over the whole run.</li>
+        <li>A web application redeployed six times without a restart dies with <code>OutOfMemoryError: Metaspace</code>. Heap usage is normal.</li>
+        <li>A service on a 64 GB machine dies with <code>OutOfMemoryError: unable to create native thread</code> while the heap is 20% full.</li>
+      </ol>
+
+      <p><strong>Part C — check yourself on the machine.</strong> Run the experiment with <code>-Xss256k</code> and then with <code>-Xss2m</code>, and write down both frame counts. Does the depth scale roughly with the stack size? Then predict what <code>-Xmx16m</code> will do to the chunk count in the <code>--oom</code> run, and check.</p>
+
+      <details class="answer">
+        <summary>Click to reveal the answer</summary>
+
+        <p><strong>Part A — the predicted output.</strong></p>
+
+        <pre class="terminal"><code>1: [added, via b]
+2: [added, via b]
+3: true
+4: 1
+5: true
+6: false</code></pre>
+
+        <p>Line by line:</p>
+
+        <ul>
+          <li><strong><code>1</code> and <code>2</code> are identical, and both show two elements.</strong> <code>b = a</code> copied the arrow, so there is one <code>ArrayList</code> object on the heap with two names. <code>addOne</code> followed its copy of the arrow and added to that one object. <code>replace</code> pointed its own parameter slot at a brand-new list, added <code>"replaced"</code> to it, and then that frame died — taking the only arrow to that new list with it, which means the list became garbage before <code>main</code> even resumed. Nothing in the output mentions it. Finally <code>b.add("via b")</code> added to the same single list as always.</li>
+          <li><strong><code>3: true</code>.</strong> <code>==</code> on references compares the arrows, and both point at the same object. It was never going to be anything else: no line in <code>main</code> assigned to <code>a</code> or <code>b</code> after the first two.</li>
+          <li><strong><code>4: 1</code>.</strong> <code>grow</code> received a copy of the number in its own frame's slot and multiplied that copy. <code>main</code>'s slot was never touched. There is no arrow involved at all — this is the contrast case.</li>
+          <li><strong><code>5: true</code>.</strong> <code>equals</code> on lists compares <em>contents</em>, and the copy's contents are equal.</li>
+          <li><strong><code>6: false</code>.</strong> <code>==</code> compares <em>arrows</em>, and <code>new</code> made a genuinely separate object at a different address. Lines 5 and 6 are the same two objects judged by two different questions, which is exactly why mixing up <code>==</code> and <code>equals</code> produces bugs that look like magic.</li>
+        </ul>
+
+        <p><em>The bonus insight:</em> the most interesting object in this program never appears in the output at all. The list created inside <code>replace</code> was alive for two lines, became unreachable the instant that frame was popped, and is now waiting for a collector that has not been mentioned yet. That is Lesson 04.</p>
+
+        <p><strong>Part B (1) — <code>GC overhead limit exceeded</code>, the heap.</strong> This is the heap saying “I am nearly full and collecting is achieving almost nothing”, which the JVM reports early rather than crawling for hours. A sawtooth whose <em>floor</em> rises over the run is the signature of retention: each cycle leaves more behind than the last. First investigation: what is still reachable at the bottom of each cycle? A static collection, a cache with no eviction, or a listener list that is only ever added to. A heap dump (Lesson 07) answers it in minutes; more <code>-Xmx</code> only moves the crash to hour six.</p>
+
+        <p><strong>Part B (2) — <code>Metaspace</code>, class metadata.</strong> Six redeploys, six sets of class loaders, and something is keeping the old ones alive — the class-loader leak from <a href="../../phase-1-foundations/chapter-01-how-java-runs/lesson-02-class-loading.html">Lesson 02</a>. Every class defined by a leaked loader keeps its description in Metaspace forever. The heap looking normal is the clue that points away from the heap. First investigation: which loaders are still reachable, and from what — typically a <code>ThreadLocal</code>, a static registry, or a thread the application started and never stopped. The operational workaround is to restart between deploys; the fix is to release the reference.</p>
+
+        <p><strong>Part B (3) — neither the heap nor Metaspace: operating-system memory.</strong> “Unable to create native thread” means the JVM asked the OS for a thread and was refused, because of an OS limit on threads per process or because there was not enough native memory left to allocate another stack. On a 64 GB machine with a 20% full heap, the usual cause is a thread leak — an executor created per request, a connection pool that never closes. Note the trap: raising <code>-Xmx</code> makes this <em>worse</em>, because the heap takes memory the thread stacks needed. First investigation: count the threads (<code>jstack</code>, Lesson 07) and see what they all have in common.</p>
+
+        <p><strong>Part C — what you should see.</strong> Roughly proportional: <code>-Xss2m</code> should give several times the depth of <code>-Xss256k</code>, though not exactly eight times, because the stack also holds fixed overhead and the JIT may compile the recursive method partway through and change the frame size. For the heap, <code>-Xmx16m</code> should produce roughly half the chunk count of <code>-Xmx32m</code>, landing a little under the ceiling in both cases — the JVM needs some of its own heap for the list holding the chunks and for everything else that was already alive. If your numbers behave differently, that is the interesting result and worth telling me about.</p>
+      </details>
+    </section>
+
+    <!-- ===================== SECTION 9 — ALMANAC ===================== -->
+    <section id="s9">
+      <h2><span class="sec-num">9</span> Almanac update</h2>
+      <p>Added to <code>almanac.md</code> this lesson: the full region map (per-thread stack, PC register and native stack; shared heap, Metaspace and code cache); what a frame contains and why local variables are thread-safe for free; the reference rule and the <em>pass references by value</em> correction with its mutate-versus-reassign table; the Metaspace and PermGen history including the Java 7 string-pool move; the <code>OutOfMemoryError</code> message table naming six distinct messages, their regions and their first investigations; how to read a <code>StackOverflowError</code> trace; and the sizing flags <code>-Xmx</code>, <code>-Xss</code> and <code>-XX:MaxMetaspaceSize</code> with the warning that <code>-Xss</code> is per thread.</p>
+    </section>
+
+    <!-- ===================== SECTION 10 — WHAT IS NEXT ===================== -->
+    <section id="s10">
+      <div class="nextup">
+        <p class="kicker">What is next</p>
+        <h2>Lesson 04 — Object lifecycle and GC fundamentals</h2>
+        <p>We have now filled the heap and watched the JVM refuse to give out more. The obvious next question is the one this lesson kept deferring: who decides what to throw away, and how do they know? Lesson 04 answers it — <em>reachability</em>, the rule that decides when an object becomes garbage; the generational hypothesis that most objects die young; and a project module that allocates in patterns designed to force collections so you can watch objects age and get promoted.</p>
+      </div>
+    </section>
+
+    <p class="position">Lesson 03 of 07 — Core Java Course 01: JVM Internals &amp; Memory Management</p>
+
+  </main>
+</div>
+</body>
+</html>

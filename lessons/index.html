@@ -22,6 +22,10 @@
         <span class="navkicker">Start here · Lesson 00 →</span>
         <span class="navtitle">Full Setup</span>
       </a>
+      <a class="navcard" href="phase-2-memory-and-gc/chapter-02-memory-and-objects/lesson-03-runtime-memory-areas.html">
+        <span class="navkicker">Latest · Lesson 03 →</span>
+        <span class="navtitle">Runtime Memory Areas</span>
+      </a>
     </nav>
   </aside>
 
@@ -37,7 +41,7 @@
     <section id="roadmap">
       <h2><span class="sec-num">★</span> You are here</h2>
       <figure class="roadmap fig">
-        <svg viewBox="0 0 720 170" role="img" aria-label="Course roadmap of three phases left to right: Foundations (current), Memory and Garbage Collection, and Observing a live JVM. A marker sits on the Foundations phase, which is in progress.">
+        <svg viewBox="0 0 720 170" role="img" aria-label="Course roadmap of three phases left to right: Foundations (current), Memory and Garbage Collection, and Observing a live JVM. Foundations is complete; a marker sits on the Memory and Garbage Collection phase, which is in progress.">
           <defs>
             <marker id="rah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
               <path class="fig-arrow-h" d="M0,0 L10,5 L0,10 z"/>
@@ -47,26 +51,26 @@
           <path class="fig-arrow" d="M120,110 L280,110" marker-end="url(#rah)"/>
           <path class="fig-arrow" d="M400,110 L560,110" marker-end="url(#rah)"/>
 
-          <!-- Phase 1: current (amber = where the learner is working) -->
-          <rect class="fig-code" x="24" y="80" width="96" height="60" rx="12"/>
+          <!-- Phase 1: complete (teal = behind you) -->
+          <rect class="fig-infra" x="24" y="80" width="96" height="60" rx="12"/>
           <text class="fig-label" x="72" y="106" text-anchor="middle">Phase 1</text>
           <text class="fig-small" x="72" y="124" text-anchor="middle">Foundations</text>
-          <!-- you-are-here pin -->
-          <circle class="fig-vs" cx="72" cy="52" r="16"/>
-          <text class="fig-vs-t" x="72" y="57" text-anchor="middle">▾</text>
-          <text class="fig-small" x="72" y="30" text-anchor="middle">you are here</text>
 
-          <!-- Phase 2 -->
-          <rect class="fig-infra" x="304" y="80" width="96" height="60" rx="12"/>
+          <!-- Phase 2: current (amber = where the learner is working) -->
+          <rect class="fig-code" x="304" y="80" width="96" height="60" rx="12"/>
           <text class="fig-label" x="352" y="106" text-anchor="middle">Phase 2</text>
           <text class="fig-small" x="352" y="124" text-anchor="middle">Memory &amp; GC</text>
+          <!-- you-are-here pin -->
+          <circle class="fig-vs" cx="352" cy="52" r="16"/>
+          <text class="fig-vs-t" x="352" y="57" text-anchor="middle">▾</text>
+          <text class="fig-small" x="352" y="30" text-anchor="middle">you are here</text>
 
           <!-- Phase 3 -->
           <rect class="fig-infra" x="584" y="80" width="112" height="60" rx="12"/>
           <text class="fig-label" x="640" y="106" text-anchor="middle">Phase 3</text>
           <text class="fig-small" x="640" y="124" text-anchor="middle">Observing</text>
         </svg>
-        <figcaption><strong>Three stages.</strong> Amber = the phase you are working through now; teal = phases still ahead. You finish one phase before the next unlocks in your own understanding — nothing here gates your clicks.</figcaption>
+        <figcaption><strong>Three stages.</strong> Amber = the phase you are working through now; teal = phases already behind you or still ahead. You finish one phase before the next unlocks in your own understanding — nothing here gates your clicks.</figcaption>
       </figure>
     </section>
 
@@ -98,13 +102,13 @@
       <h2><span class="sec-num">2</span> Phase 2 · Memory &amp; Garbage Collection</h2>
       <p class="hub-phase">Runtime memory areas · object lifecycle · GC algorithms · the JIT</p>
       <div class="hub-grid">
+        <a class="hub-card" href="phase-2-memory-and-gc/chapter-02-memory-and-objects/lesson-03-runtime-memory-areas.html">
+          <span class="status-badge done">Done</span>
+          <h3>Lesson 03 — Runtime Memory Areas</h3>
+          <p>Stack frames vs the shared heap, why a variable is an arrow, Metaspace after PermGen — then both walls provoked on purpose.</p>
+        </a>
         <div class="hub-card">
           <span class="status-badge next">Next</span>
-          <h3>Lesson 03 — Runtime memory areas</h3>
-          <p>Stack vs heap, Metaspace, and provoking <code>StackOverflowError</code> and <code>OutOfMemoryError</code> on purpose.</p>
-        </div>
-        <div class="hub-card">
-          <span class="status-badge planned">Planned</span>
           <h3>Lesson 04 — Object lifecycle &amp; GC basics</h3>
           <p>Reachability, the generational hypothesis, and watching objects age and promote.</p>
         </div>
