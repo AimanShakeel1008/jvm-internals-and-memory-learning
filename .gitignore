@@ -7,6 +7,9 @@ progress-tracker.md
 target/
 *.class
 
+# GC logs written by the Lesson 05 experiments (regenerated on every run)
+*.log
+
 # IDEs
 .idea/
 *.iml

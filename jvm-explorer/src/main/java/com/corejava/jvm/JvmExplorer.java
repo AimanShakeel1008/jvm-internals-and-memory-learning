@@ -21,6 +21,11 @@ import com.corejava.jvm.memory.StackDepthProbe;
 import com.corejava.jvm.gc.AllocationPatterns;
 import com.corejava.jvm.gc.GcStats;
 import com.corejava.jvm.gc.ReachabilityProbe;
+// Lesson 05's module: reads a GC log this project produced and summarises it.
+import com.corejava.jvm.gclog.GcLogSummaryTool;
+
+// Path names a file on disk without opening it.
+import java.nio.file.Path;
 
 // The front door of jvm-explorer. Lesson by lesson this program will grow modules
 // that provoke the JVM (fill memory, trigger garbage collection, overflow the stack).
@@ -189,5 +194,13 @@ public final class JvmExplorer {
         System.out.println(GcStats.describe());
         System.out.println("Watch objects age and promote: java -XX:+UseSerialGC -Xmx128m -Xmn32m "
                 + "-XX:MaxTenuringThreshold=3 -cp target/classes com.corejava.jvm.experiments.GenerationsExperiment");
+
+        // ---- Lesson 05: what the collector wrote about itself -------------------
+        // A GC log is the collector's own account of every pause. If a log produced by
+        // this project's workload exists in the current folder (jvm-explorer/ when run
+        // through Maven), summarise it; otherwise the tool explains how to make one.
+        System.out.println();
+        System.out.println("--- GC log: the collector's own account, summarised ---");
+        System.out.println(GcLogSummaryTool.summarise(Path.of(GcLogSummaryTool.DEFAULT_LOG_FILE)));
     }
 }

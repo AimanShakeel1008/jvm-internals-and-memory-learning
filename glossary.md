@@ -175,3 +175,25 @@ Every term this course introduces, in plain language, with the lesson where it f
 | `finalize()` / `Cleaner` | `finalize()` was meant to run when an object became garbage; it is unpredictable, slows the GC, and was deprecated for removal in Java 18 (JEP 421). `java.lang.ref.Cleaner` is the last-resort replacement; try-with-resources is the normal answer. | Lesson 04 |
 | `GarbageCollectorMXBean` | The monitoring object for one collector, reporting how many collections it has run and how many milliseconds they took in total. | Lesson 04 |
 | Serial collector | HotSpot's simplest collector (`-XX:+UseSerialGC`), single-threaded, whose layout — one Eden, two survivor spaces, one old generation — matches the textbook picture exactly. Its collectors report as `Copy` and `MarkSweepCompact`. | Lesson 04 |
+| Throughput | The share of a program's run spent running its own code rather than collecting garbage. An hour-long job with 3 minutes of GC has 95% throughput. | Lesson 05 |
+| Pause time (latency) | How long the application stands still during a stop-the-world pause — both typical and, more importantly, worst case. | Lesson 05 |
+| Footprint | The extra memory and CPU a collector needs on top of the program: spare heap, bookkeeping tables, GC threads. | Lesson 05 |
+| Mark-compact | Marking live objects from the roots, then sliding them together. What Serial and Parallel run, stop-the-world, on the old generation. | Lesson 05 |
+| Parallel collector | `-XX:+UseParallelGC`: Serial's stop-the-world algorithms run on many GC threads. Highest throughput; pauses still grow with the heap. Default up to Java 8. | Lesson 05 |
+| G1 (Garbage First) | `-XX:+UseG1GC`, the default since Java 9. Divides the heap into regions, marks the old generation concurrently, and collects the regions with the most garbage first, aiming at a pause goal. | Lesson 05 |
+| Region (G1) | One of many equal-sized blocks (typically 1–32 MB) a G1 heap is divided into. Each has a role at any moment — Eden, survivor, old, humongous or free — and can change role after being emptied. | Lesson 05 |
+| Concurrent marking | Marking live objects on background threads while the application keeps running, kept correct by write barriers. G1 finishes it with two short pauses, Remark and Cleanup. | Lesson 05 |
+| Mixed collection | A G1 collection of all young regions plus a few of the old regions with the most garbage. | Lesson 05 |
+| Collection set | The regions G1 picks to evacuate in one pause, sized to fit its pause goal. | Lesson 05 |
+| Humongous object | In G1, an object at least half a region in size. It gets whole regions of its own, directly in the old generation. Logged as `G1 Humongous Allocation` when it triggers a collection. | Lesson 05 |
+| `-XX:MaxGCPauseMillis` | G1's pause-time goal (default 200 ms). A goal G1 sizes its work to meet, not a guarantee. | Lesson 05 |
+| ZGC | `-XX:+UseZGC`: marks AND moves objects concurrently, using load barriers, so pauses stay under a millisecond regardless of heap size, at the cost of throughput and headroom. Generational mode added in Java 21 (JEP 439, `-XX:+ZGenerational`). | Lesson 05 |
+| Load barrier | A tiny check the JIT adds to every reference read. In ZGC it fixes up a reference whose object has been moved, before your code uses it. | Lesson 05 |
+| Shenandoah | Another low-pause, concurrent-compacting collector, shipped in OpenJDK builds such as Temurin. | Lesson 05 |
+| Unified logging (`-Xlog`) | The JVM's single logging system since Java 9: `-Xlog:WHAT:WHERE:DECORATIONS:OUTPUT-OPTIONS`, e.g. `-Xlog:gc:file=gc.log`. Replaced `-XX:+PrintGCDetails` and `-Xloggc`. | Lesson 05 |
+| Log tag / decoration | A tag labels a message's subject (`gc`, `gc+age`, `class+load`); `*` includes every combination. Decorations are the bracketed prefix fields, by default `[uptime][level][tags]`. | Lesson 05 |
+| Pause line | The one-line GC log record of a stop-the-world pause: uptime, `GC(n)`, `Pause Kind`, causes, heap before → after (committed), duration. | Lesson 05 |
+| GC cause | The bracketed reason in a pause line: `Allocation Failure`, `G1 Evacuation Pause`, `Concurrent Start`, `Mixed`, `G1 Humongous Allocation`, `Metadata GC Threshold`, `Ergonomics`, `System.gc()`. | Lesson 05 |
+| Regular expression (`Pattern` / `Matcher`) | A compact language for describing the shape of text and pulling named pieces out of it. Used by the project's GC log parser. | Lesson 05 |
+| `@TempDir` | A JUnit 5 annotation giving a test a fresh empty folder that is deleted afterwards, so it can use real files without touching the project. | Lesson 05 |
+| CMS | The old Concurrent Mark Sweep collector (`-XX:+UseConcMarkSweepGC`), removed in Java 14. Its flags are ignored with a warning on modern JVMs. | Lesson 05 |

@@ -250,3 +250,40 @@ Decodes the errors this course's setup and lessons are likely to produce, with t
 ### `mvn compile exec:java` shows many "Old Generation" collections
 
 **Not an error.** `ReachabilityProbe` calls `System.gc()` several times on purpose, and with the default G1 collector each request is carried out as a full collection, which is counted under the old-generation collector.
+
+---
+
+## Lesson 05 — GC logs and collectors
+
+### The summary tool says `No GC log at ... yet`
+
+**What it means:** there is no `gc.log` in the folder the command ran from. The workload writes the log relative to *its* working folder.
+**Fix:** run both commands from inside `jvm-explorer/`: first `java -Xmx64m -Xlog:gc:file=gc.log -cp target/classes com.corejava.jvm.experiments.GcWorkload`, then the summary tool. `mvn compile exec:java` also looks in `jvm-explorer/`.
+
+### The summary reports `pauses : 0` for a log that clearly has GC activity
+
+**What it means:** either the log was written by ZGC (whose Java 21 `gc` lines are cycle summaries, not pause lines — its pauses are logged under a more detailed tag), or the log was written with decorations that drop the uptime (the parser needs the `[0.215s]` field), or the JDK's line format differs from the Java 21 format the parser was written for.
+**Fix:** open the log and look at a pause line. If it is ZGC, that is expected. If you changed the decorations, keep `uptime`. If the format genuinely differs, send me one line — a new test case and a small pattern change will teach the parser.
+
+### `Ignoring option UseConcMarkSweepGC; support was removed in 14.0` (or similar)
+
+**What it means:** a flag for a collector or feature that no longer exists. The JVM ignored it and chose a collector by itself.
+**Fix:** delete the flag. Then check which collector is really running (the `Using ...` line of the GC log) and decide deliberately.
+
+### `Unrecognized VM option 'PrintGCDetails'` or a deprecation warning about GC logging flags
+
+**What it means:** pre-Java-9 logging flags. Some are translated to unified logging with a warning; others stop the JVM from starting.
+**Fix:** replace them with `-Xlog:gc*:file=gc.log` (add rotation options for a long-running service).
+
+### PowerShell splits `-Xlog:gc,gc+age=trace` or other `-Xlog` options with commas
+
+**What it means:** PowerShell treats an unquoted comma as an array separator, so the JVM receives a mangled argument.
+**Fix:** quote the whole option: `"-Xlog:gc*:file=gc.log:time,uptime,level,tags"`.
+
+### The workload under `-Xmx32m` (or smaller) dies with `OutOfMemoryError: Java heap space`
+
+**Not a bug in the project.** The workload keeps about 25 MB alive on purpose. A heap barely bigger than the live data leaves no room to work — exactly the "never size a heap below its live data" lesson. Use `-Xmx64m` for the standard run.
+
+### `gc.log` files appear in `jvm-explorer/` and `git status` does not show them
+
+**Intended.** `*.log` is listed in `.gitignore`, because logs are regenerated on every run and do not belong in history.

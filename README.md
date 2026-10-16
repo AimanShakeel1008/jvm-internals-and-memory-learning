@@ -10,7 +10,7 @@ The course text is a self-contained HTML learning system — open **[`lessons/in
 
 `jvm-explorer/` is a Maven project built to provoke and observe the JVM itself. Lesson by lesson it gains modules that fill heap regions on purpose, trigger and parse GC logs, watch classes load, overflow the stack on demand, and expose JIT behavior.
 
-**Current capabilities (after Lesson 04):**
+**Current capabilities (after Lesson 05):**
 
 - Self-inspection: prints the running JVM's Java version, JVM name (HotSpot), vendor, maximum heap size, and CPU core count.
 - Class file inspection: reads any loaded class's own `.class` bytes off the class path and decodes the eight-byte header — magic number, minor version, and major version turned into a Java release name.
@@ -23,8 +23,9 @@ The course text is a self-contained HTML learning system — open **[`lessons/in
 - Heap filler: allocates and retains memory either safely up to a budget or, on explicit request, until the JVM throws `OutOfMemoryError` — then releases everything and reports the exact message.
 - Reachability probe: proves the garbage-collection rule four ways by watching objects through weak references — a reachable object survives, an unreachable one is collected, an unreachable *cycle* is collected, and an object held by a static field survives.
 - Garbage-collector counters: reports every collector's collection count and total time, and how much Eden, the survivor space and the old generation currently hold; can produce garbage until a collection is observed.
-- Experiments (labelled for-learning-only): a JIT warm-up stopwatch, a class-loading experiment whose markers line up against the JVM's own `-verbose:class` output, a memory-limits experiment that walks up to both the stack wall and the heap wall, and a generations experiment that shows kept objects ageing in the survivor space and then being promoted to the old generation.
-- Tests: 71 JUnit tests. The build fails loudly if the running JVM is not the pinned Java 21, if class files are not compiled to Java 21, if the two disagree, if any class-initialization rule stops holding, if the reference and memory-reporting rules stop holding, or if the reachability rules stop holding.
+- GC log summariser: reads a HotSpot unified-logging GC log (`-Xlog:gc:file=gc.log`) and prints the collector, pause counts by kind, total / average / maximum pause, heap reclaimed, the share of time paused, and a live-data estimate from the heap after the last full GC. `JvmExplorer` summarises `gc.log` automatically when it finds one.
+- Experiments (labelled for-learning-only): a JIT warm-up stopwatch, a class-loading experiment whose markers line up against the JVM's own `-verbose:class` output, a memory-limits experiment that walks up to both the stack wall and the heap wall, a generations experiment that shows kept objects ageing in the survivor space and then being promoted to the old generation, and a repeatable GC workload for producing logs under each collector.
+- Tests: 87 JUnit tests. The build fails loudly if the running JVM is not the pinned Java 21, if class files are not compiled to Java 21, if the two disagree, if any class-initialization rule stops holding, if the reference and memory-reporting rules stop holding, or if the reachability rules stop holding.
 
 ## Requirements (pinned for the whole series)
 
@@ -61,8 +62,14 @@ java -Xmx32m -cp target/classes com.corejava.jvm.experiments.MemoryLimitsExperim
 
 # watch kept objects age through minor collections and get promoted (Serial collector = textbook layout)
 java -XX:+UseSerialGC -Xmx128m -Xmn32m -XX:MaxTenuringThreshold=3 -cp target/classes com.corejava.jvm.experiments.GenerationsExperiment
-java -XX:+UseSerialGC -Xmx128m -Xmn32m -XX:MaxTenuringThreshold=3 -Xlog:gc,gc+age=trace -cp target/classes com.corejava.jvm.experiments.GenerationsExperiment
+java -XX:+UseSerialGC -Xmx128m -Xmn32m -XX:MaxTenuringThreshold=3 "-Xlog:gc,gc+age=trace" -cp target/classes com.corejava.jvm.experiments.GenerationsExperiment
+
+# produce a GC log, then summarise it (repeat with -XX:+UseSerialGC / UseParallelGC / UseZGC to compare)
+java -Xmx64m -Xlog:gc:file=gc.log -cp target/classes com.corejava.jvm.experiments.GcWorkload
+java -cp target/classes com.corejava.jvm.gclog.GcLogSummaryTool gc.log
 ```
+
+GC log files (`*.log`) are git-ignored — they are regenerated on every run.
 
 The last command deliberately exhausts the heap and prints the resulting `OutOfMemoryError`. That is the intended outcome, not a bug — nothing else in the project does it, and no test ever does.
 

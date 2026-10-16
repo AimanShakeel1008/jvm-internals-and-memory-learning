@@ -30,11 +30,10 @@
         <span class="navtitle">Runtime Memory Areas</span>
       </a>
       <a class="navmap" href="../../index.html">↑ Course map</a>
-      <span class="navcard disabled">
+      <a class="navcard" href="../chapter-03-gc-and-jit/lesson-05-gc-algorithms-and-logs.html">
         <span class="navkicker">Next · Lesson 05 →</span>
-        <span class="navtitle">GC algorithms &amp; reading GC logs</span>
-        <span class="navnote">not yet written</span>
-      </span>
+        <span class="navtitle">GC Algorithms &amp; Reading GC Logs</span>
+      </a>
     </nav>
   </aside>
 
@@ -729,7 +728,7 @@ Expected shape: about 1 MB sits in survivor for a few rounds, then moves to old 
 
       <p>To see the JVM's own account of the same events, add two logging switches (unified logging, Java 9 and later). <code>gc</code> prints one line per collection, and <code>gc+age=trace</code> prints the age table each time:</p>
 
-      <pre class="terminal"><code>java -XX:+UseSerialGC -Xmx128m -Xmn32m -XX:MaxTenuringThreshold=3 -Xlog:gc,gc+age=trace -cp target/classes com.corejava.jvm.experiments.GenerationsExperiment</code></pre>
+      <pre class="terminal"><code>java -XX:+UseSerialGC -Xmx128m -Xmn32m -XX:MaxTenuringThreshold=3 "-Xlog:gc,gc+age=trace" -cp target/classes com.corejava.jvm.experiments.GenerationsExperiment</code></pre>
 
       <pre class="terminal"><code><span class="cmt">// PREDICTED SHAPE of the log lines (exact wording to verify on your JDK)</span>
 [0.214s][info][gc] GC(0) Pause Young (Allocation Failure) 26M-&gt;1M(123M) 3.912ms
@@ -853,7 +852,7 @@ reports.<span class="fn">put</span>(customer, <span class="kw">new</span> <span 
     <section id="s10">
       <div class="nextup">
         <p class="kicker">What is next</p>
-        <h2>Lesson 05 — GC algorithms and reading GC logs</h2>
+        <h2><a href="../chapter-03-gc-and-jit/lesson-05-gc-algorithms-and-logs.html">Lesson 05 — GC algorithms and reading GC logs</a></h2>
         <p>We now know <em>what</em> every collector must do. Lesson 05 compares <em>how</em> the real ones do it — Serial, Parallel, G1 and ZGC, and the honest trade-off between pause time and throughput — then turns on GC logging and gives jvm-explorer a module that parses its own log into a readable summary.</p>
       </div>
     </section>

@@ -284,3 +284,47 @@ The living cheat-sheet of this course: rules of thumb, contracts, gotchas, and d
 - `ManagementFactory.getGarbageCollectorMXBeans()` gives each collector's count and total time; pool names contain `Eden` / `Survivor` / `Old` or `Tenured` on HotSpot (exact names vary by collector — search by name).
 - `-Xlog:gc` prints one line per collection; `-Xlog:gc+age=trace` prints the age table. `Pause Young (Allocation Failure) 26M->1M(123M) 3.9ms` = minor GC because Eden was full, heap used before → after (committed), pause length.
 - **To see the textbook layout exactly, use `-XX:+UseSerialGC`.** The default G1 keeps the same roles but builds them from regions (Lesson 05).
+
+---
+
+## Lesson 05 — GC Algorithms and Reading GC Logs
+
+**The trade-off every collector makes:**
+
+- **Throughput vs pause time vs footprint — pick a point, not all three.** Shorter pauses require GC work alongside your code; that background work and its barriers cost CPU, i.e. throughput.
+- **Choose by what your program cares about:** total run time (batch) → throughput; individual responses (services) → pause time, especially the *worst* pause.
+
+**The four collectors:**
+
+| Collector | Flag | Mechanism | Pauses | Throughput | Choose it for |
+| --- | --- | --- | --- | --- | --- |
+| Serial | `-XX:+UseSerialGC` | one thread, all stop-the-world | long, grow with heap | best on 1 CPU | small heaps, 1-CPU containers, CLI tools |
+| Parallel | `-XX:+UseParallelGC` | many threads, all stop-the-world | shorter, still grow with heap | **highest** | batch / data jobs |
+| G1 | `-XX:+UseG1GC` | regions, concurrent marking, mixed collections, pause goal | short, aimed at goal (200 ms) | good | **the default (Java 9+)**, general services |
+| ZGC | `-XX:+UseZGC` | concurrent marking *and* moving, load barriers | **sub-ms**, independent of heap | lower | latency-critical, huge heaps |
+
+- **The JVM picks Serial by itself on a "small" machine** (roughly < 2 CPUs or < ~1792 MB — verify for your JDK), and it reads **container** limits. A service fine on a laptop can silently run Serial in a 1-CPU container. Read the `Using ...` line.
+- **G1 in one breath:** heap = equal regions with roles (Eden, survivor, old, humongous, free); concurrent marking finds how much garbage each old region holds, finished by short **Remark** and **Cleanup** pauses; **mixed** collections evacuate young regions + the dirtiest old regions (the **collection set**), sized to `-XX:MaxGCPauseMillis` (a goal, not a guarantee); objects ≥ half a region are **humongous**; falling behind → **full GC** — the line to look for first.
+- **ZGC's price:** a load barrier on every reference read, background threads taking CPU, and spare heap needed. Java 21: generational mode via `-XX:+ZGenerational` (JEP 439); later releases made it the default — verify.
+- **CMS is gone (removed in Java 14).** Its flags are ignored with a start-up warning. Start Java 21 tuning from *no* GC flags, measure, then change one thing for a reason you can name.
+
+**Logging:**
+
+- `-Xlog:WHAT:WHERE:DECORATIONS:OUTPUT-OPTIONS`. Everyday forms: `-Xlog:gc` (one line per pause), `-Xlog:gc*` (all GC detail), `-Xlog:gc:file=gc.log`, and for production `-Xlog:gc*:file=gc.log:time,uptime,level,tags:filecount=5,filesize=10m`.
+- **Log to a file with rotation, and leave `gc`-level logging on permanently** — it is cheap and it is what you need after an incident.
+- **`-XX:+PrintGCDetails`, `-Xloggc` and friends are pre-Java-9.** Rewrite scripts that use them.
+- **Turn logging on in a running JVM:** `jcmd <pid> VM.log output=gc.log what=gc` (check `jcmd <pid> help VM.log`).
+
+**Reading a pause line:**
+
+```text
+[0.215s][info][gc] GC(0) Pause Young (Normal) (G1 Evacuation Pause) 25M->3M(256M) 2.512ms
+ uptime  level tag  id    kind        causes                       before->after(committed) pause
+```
+
+- **Kinds:** `Young` = minor GC; `Full` = whole heap (worry); `Remark` / `Cleanup` = G1's short pauses ending concurrent marking. Lines saying `Concurrent` are **not** pauses.
+- **Causes:** `Allocation Failure` / `Normal` / `G1 Evacuation Pause` = routine; `Concurrent Start` = marking begins (frequent → old gen fills fast); `Mixed` = garbage-first working; `G1 Humongous Allocation` (frequent → many big short-lived arrays); `Metadata GC Threshold` (repeated → too many classes); `Ergonomics` (frequent full → heap too small for live data); `System.gc()` in a service → find the caller.
+- **Read three numbers first: the count of full GCs, the maximum pause, and the heap after full GCs over time.** Never judge GC by its average pause — averages hide the one long full GC users feel.
+- **Heap after a full GC = live data.** Rising across full GCs → leak. Live data is a property of the program, not the heap size — size `-Xmx` from it, with headroom.
+- **A young GC that frees almost nothing (`120M->118M(128M)`)** means live data nearly fills the heap: too small a heap, or a leak.
+- **A parser for GC logs needs one subtlety:** causes can contain brackets — `(System.gc())`. "Anything except `)`" breaks on it.
