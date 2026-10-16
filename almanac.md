@@ -230,3 +230,57 @@ The living cheat-sheet of this course: rules of thumb, contracts, gotchas, and d
 - `ManagementFactory` gives the finer view: `getMemoryMXBean().getNonHeapMemoryUsage()`, `getMemoryPoolMXBeans()` (search **by name**, the list varies), `getClassLoadingMXBean().getLoadedClassCount()`.
 - **There is no portable API for "how big is my stack".** Measure it by overflowing on purpose and counting.
 - **Every memory number is an observation about one machine at one moment.** Defaults come from the machine's RAM — and inside a container, from the *container's* limits, which is why a service that is fine on a laptop dies in Kubernetes.
+
+---
+
+## Lesson 04 — Object Lifecycle and GC Fundamentals
+
+**The rule that decides what is garbage:**
+
+- **An object is garbage when no chain of references from a GC root reaches it.** The number of arrows pointing at it is irrelevant.
+- **GC roots:** local variables in every *live* frame (every thread), static fields of loaded classes, running threads, a few JVM-internal references.
+- **Java traces from the roots; it does not count references.** Reference counting can never free a cycle (two objects pointing at each other). Tracing ignores cycles entirely — an unreachable cycle is garbage like anything else.
+- **Four ways an object becomes unreachable:** its method returns (frame popped — the most common), a variable is overwritten or nulled, it is removed from a collection, or whatever pointed at it became garbage itself.
+- **A Java memory leak = no longer needed, but still reachable.** Usual culprits: static collections, unbounded caches, listeners never removed, `ThreadLocal`s on pooled threads, a non-static inner class or lambda capturing `this`. The cure is always to cut the path.
+- **Eligible is not collected.** Cutting the last path makes an object *eligible*; it stays in the heap (and in `used`) until a collection runs. `System.gc()` is a request — and on HotSpot's defaults it triggers a *full* GC, so never call it in application code. `-XX:+DisableExplicitGC` makes it a no-op.
+
+**How collectors work, one line each:**
+
+| Step / strategy | What it does | Cost / catch |
+| --- | --- | --- |
+| Marking | follow references from the roots, flag what is reached | proportional to **live** objects; garbage never visited |
+| Stop-the-world pause | pause every application thread so the walk is safe | the "freeze" users notice; modern collectors keep it short |
+| Sweep | list dead objects' space as free gaps | leaves **fragmentation** |
+| Compact | slide live objects together | no fragmentation; must move objects and fix references |
+| Copy | copy live objects to an empty area, free the old area in one step | needs spare space; cost depends only on **survivors** |
+
+**Generations:**
+
+- **The generational hypothesis: most objects die young.** So collect new objects separately and often, with copying — almost nothing survives, so almost nothing is copied.
+- **Young generation = Eden + two survivor spaces (S0/S1).** New objects are created in Eden by bump-the-pointer allocation, each thread in its own TLAB — which is why `new` is cheap.
+- **Minor GC** (Eden full): pause, copy live Eden + occupied-survivor objects to the empty survivor with **age + 1**, declare Eden and the old survivor empty, swap the survivors' roles.
+- **Promotion:** at the **tenuring threshold** (max 15 in HotSpot — 4 age bits; `-XX:MaxTenuringThreshold`; the JVM may lower it itself) an object is copied to the **old generation** instead.
+- **Premature promotion:** survivors that do not fit in the survivor space go straight to old, however young. Fix with a larger young generation, not a larger heap.
+- **Very large objects may skip the young generation** (G1 calls them humongous — Lesson 05).
+- **Old → young references are found through the card table:** a write barrier on every reference store marks that slice of the old generation dirty; a minor GC scans only dirty cards.
+- **Minor GCs never reclaim anything in the old generation.** Garbage there waits for a major or full GC.
+
+| Term | Collects | Frequency | Cost |
+| --- | --- | --- | --- |
+| Minor GC | young generation | often (Eden fills) | small — proportional to young survivors |
+| Major GC | old generation | rarely | large — big, mostly alive |
+| Full GC | whole heap (often Metaspace too) | ideally almost never | largest; usually the longest pause |
+
+**Reading an old-generation graph:**
+
+- **The level a full GC returns to = live data.** If that level keeps **rising** → a **leak**: find what still reaches the growing objects (heap dump, Lesson 07).
+- **If it returns to the same level but fills fast** → **premature promotion**: enlarge the young generation / survivor spaces.
+
+**Observing it:**
+
+- `WeakReference` watches an object without keeping it alive; `get()` returns `null` once it has been collected. `WeakHashMap` is built on it — and leaks if a value refers back to its own key.
+- **Scope is not reachability.** The JIT may treat a variable as dead after its last use. Use `Reference.reachabilityFence(obj)` when an object must stay reachable up to an exact line.
+- **Never use `finalize()`** (deprecated for removal, Java 18 / JEP 421). Use try-with-resources; `Cleaner` only as a last-resort safety net.
+- `ManagementFactory.getGarbageCollectorMXBeans()` gives each collector's count and total time; pool names contain `Eden` / `Survivor` / `Old` or `Tenured` on HotSpot (exact names vary by collector — search by name).
+- `-Xlog:gc` prints one line per collection; `-Xlog:gc+age=trace` prints the age table. `Pause Young (Allocation Failure) 26M->1M(123M) 3.9ms` = minor GC because Eden was full, heap used before → after (committed), pause length.
+- **To see the textbook layout exactly, use `-XX:+UseSerialGC`.** The default G1 keeps the same roles but builds them from regions (Lesson 05).

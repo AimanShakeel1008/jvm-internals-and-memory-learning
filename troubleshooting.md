@@ -218,3 +218,35 @@ Decodes the errors this course's setup and lessons are likely to produce, with t
 ### Used heap did not drop after the filler released its 8 MB
 
 **Not an error.** Dropping a reference makes an object *eligible* for collection; it does not collect it. The number moves when the collector next runs, which is its decision, not yours. This is exactly the behaviour Lesson 04 explains.
+
+---
+
+## Lesson 04 — garbage collection and generations
+
+### `ReachabilityProbeTest` fails: "An object no root can reach should be reclaimed"
+
+**What it means:** the two tests that check unreachable objects *are* collected depend on `System.gc()` being honoured, which is a request, not a guarantee. The usual cause is the JVM being started with `-XX:+DisableExplicitGC` (sometimes set in `MAVEN_OPTS`, `JAVA_TOOL_OPTIONS`, or an IDE run configuration), which turns `System.gc()` into a no-op.
+**Fix:** check `echo %JAVA_TOOL_OPTIONS%` and `echo %MAVEN_OPTS%` (PowerShell: `$env:JAVA_TOOL_OPTIONS`, `$env:MAVEN_OPTS`) and remove the flag for this project. The two *guaranteed* tests (reachable objects survive) can never fail on a correct JVM — if one of those fails, tell me exactly what it printed.
+
+### `ReachabilityProbe` reports a reachable object as collected
+
+**What it means:** should be impossible, because the probe keeps the object reachable with `Reference.reachabilityFence`. If you have edited the probe and removed the fence, the JIT is allowed to treat the local variable as dead after its last use and the object can vanish early — scope is not reachability.
+**Fix:** restore the `Reference.reachabilityFence(...)` call after the check.
+
+### The generations experiment shows no jump into "old"
+
+**What it means:** most often, the flags did not take effect — for example the experiment was run through `mvn exec:java` (which runs inside Maven's own JVM, ignoring your `-XX` flags) or without `-XX:MaxTenuringThreshold=3`, so the objects need up to 15 collections to promote and six rounds are not enough.
+**Fix:** run it as a plain `java` command after `mvn compile`, exactly as the lesson shows, and check the first lines say `collector: Copy` and `collector: MarkSweepCompact`. If they do and there is still no jump, try `-XX:MaxTenuringThreshold=1`.
+
+### The generations experiment jumps into "old" at round 1
+
+**Not an error — premature promotion.** If the survivor space is too small for the kept objects (for example with a smaller `-Xmn`), the overflow goes straight to the old generation. The JVM may also lower the tenuring threshold on its own when survivors crowd the space. This is the effect the lesson's challenge asks you to provoke on purpose.
+
+### The generations table shows `n/a` everywhere
+
+**What it means:** this JVM exposes no heap pool whose name contains `Survivor` or `Old`/`Tenured` — for example a non-generational collector.
+**Fix:** run with `-XX:+UseSerialGC` as the lesson shows.
+
+### `mvn compile exec:java` shows many "Old Generation" collections
+
+**Not an error.** `ReachabilityProbe` calls `System.gc()` several times on purpose, and with the default G1 collector each request is carried out as a full collection, which is counted under the old-generation collector.

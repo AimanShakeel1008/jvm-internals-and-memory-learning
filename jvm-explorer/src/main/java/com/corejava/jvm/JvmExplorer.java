@@ -13,9 +13,14 @@ import com.corejava.jvm.loading.InitializationLog;
 import com.corejava.jvm.loading.LazyHolder;
 // Lesson 03's modules: where everything the JVM makes actually lives, and what happens
 // at the two walls - the stack that runs out of frames and the heap that runs out of room.
+import com.corejava.jvm.memory.HeapSnapshot;
 import com.corejava.jvm.memory.MemoryRegions;
 import com.corejava.jvm.memory.ReferenceDemo;
 import com.corejava.jvm.memory.StackDepthProbe;
+// Lesson 04's modules: when an object becomes garbage, and the collector's own counters.
+import com.corejava.jvm.gc.AllocationPatterns;
+import com.corejava.jvm.gc.GcStats;
+import com.corejava.jvm.gc.ReachabilityProbe;
 
 // The front door of jvm-explorer. Lesson by lesson this program will grow modules
 // that provoke the JVM (fill memory, trigger garbage collection, overflow the stack).
@@ -160,5 +165,29 @@ public final class JvmExplorer {
         System.out.println("Ended with             : " + StackDepthProbe.lastErrorType());
         System.out.println("The heap's own wall is provoked separately: "
                 + "java -Xmx32m -cp target/classes com.corejava.jvm.experiments.MemoryLimitsExperiment --oom");
+
+        // ---- Lesson 04: who decides what is garbage, and how cheaply ------------
+        // An object is garbage when no chain of references from a GC root reaches it.
+        // The probe checks that rule four ways, watching each object through a weak
+        // reference - a pointer that lets us observe an object without keeping it alive.
+        System.out.println();
+        System.out.println("--- object lifecycle: reachability decides what is garbage ---");
+        System.out.println(ReachabilityProbe.describe());
+
+        // Make garbage until the JVM is forced to collect, then report how much it took.
+        // That figure is roughly the free space in Eden at the time - the young
+        // generation fills, a minor collection runs, and this loop notices.
+        long garbageBytes = AllocationPatterns.churnUntilCollection(
+                AllocationPatterns.DEFAULT_OBJECT_BYTES, AllocationPatterns.safeCapBytes());
+        System.out.println();
+        System.out.println("--- generations: the collector's own counters ---");
+        System.out.println("garbage made before the next collection : "
+                + (garbageBytes < 0 ? "none observed" : HeapSnapshot.toMegabytes(garbageBytes) + " MB"));
+
+        // Which collectors this JVM runs, how often each has run, and how full each
+        // generation is right now. Names depend on the collector - to verify on your JDK.
+        System.out.println(GcStats.describe());
+        System.out.println("Watch objects age and promote: java -XX:+UseSerialGC -Xmx128m -Xmn32m "
+                + "-XX:MaxTenuringThreshold=3 -cp target/classes com.corejava.jvm.experiments.GenerationsExperiment");
     }
 }

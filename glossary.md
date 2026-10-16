@@ -141,3 +141,37 @@ Every term this course introduces, in plain language, with the lesson where it f
 | MX bean / `ManagementFactory` | The JVM's self-monitoring API: plain Java objects the JVM keeps about itself, describing memory, threads and class loading. `ManagementFactory` is the front door to them. | Lesson 03 |
 | Memory pool | One named region the JVM exposes for monitoring, such as `Metaspace` or `G1 Eden Space`. Which pools exist depends on the JVM, the garbage collector and the version, so code should search them by name rather than by position. | Lesson 03 |
 | `OptionalLong` | A JDK type meaning "a long, or nothing", used instead of returning `-1` as a secret code for a missing value. The empty case says "not available", which is a different statement from "zero". | Lesson 03 |
+| Garbage collector (GC) | The part of the JVM that finds objects the program can no longer reach and reclaims their memory. Your code never frees an object itself. | Lesson 04 |
+| Reference counting | Freeing an object when the number of references pointing at it drops to zero. Java does NOT use it, because two objects pointing at each other never reach zero — cycles leak. | Lesson 04 |
+| GC roots | The starting points the collector is certain the program is using: local variables in every live frame, static fields of loaded classes, running threads, and a few JVM-internal references. | Lesson 04 |
+| Reachability / reachable | An object is reachable if some chain of references leads to it from a GC root. Unreachable objects are garbage, however many other objects point at them. | Lesson 04 |
+| Garbage | An object no chain of references from any GC root can reach. Eligible for collection — not yet collected. | Lesson 04 |
+| Tracing collector | A collector that finds live objects by following references outward from the roots. Every HotSpot collector is one, which is why unreachable cycles are collected. | Lesson 04 |
+| Memory leak (in Java) | An object the program no longer needs that is still reachable — usually through a static collection, an unbounded cache, a listener never removed, or a `ThreadLocal`. The collector is forbidden to touch it. | Lesson 04 |
+| Eligible for collection | The state of an object once its last path from a root is cut. It still occupies heap and counts in `used` until a collection actually runs. | Lesson 04 |
+| Marking | The collector's walk from the roots, flagging every object it reaches as alive. Its cost is proportional to the number of *live* objects; garbage is never visited. | Lesson 04 |
+| Stop-the-world pause | A period during which every application thread is paused so the collector can work safely. The "freeze" users notice. Modern collectors keep these short. | Lesson 04 |
+| Sweep / fragmentation | Sweeping adds dead objects' space to a list of free gaps. Fragmentation is free memory split into holes too small to use, so a large object can fail to fit despite plenty of free memory in total. | Lesson 04 |
+| Compaction | Sliding live objects together so free space becomes one solid block. Removes fragmentation at the cost of moving objects and updating references to them. | Lesson 04 |
+| Copying collection | Copying every live object into an empty area, then treating the whole old area as free in one step. Its cost depends only on how much is alive — cheap when almost everything is dead. | Lesson 04 |
+| Generational hypothesis | The observation that most objects die very young, and the few that survive tend to live long. The bet behind splitting the heap into young and old generations. | Lesson 04 |
+| Generation | An area of the heap holding objects of roughly the same age. HotSpot uses a young generation and an old generation. | Lesson 04 |
+| Young generation | Where new objects live: Eden plus two survivor spaces. Collected often and cheaply. | Lesson 04 |
+| Eden | The part of the young generation where (almost) every new object is created. | Lesson 04 |
+| Bump-the-pointer allocation | Creating an object by handing out the next N free bytes and moving a pointer forward by N. Why `new` is cheap in Java. | Lesson 04 |
+| TLAB (thread-local allocation buffer) | A private slice of Eden given to one thread, so it can bump-allocate without coordinating with other threads. | Lesson 04 |
+| Survivor spaces (S0 / S1) | Two small, equal areas beside Eden. One holds objects that survived earlier collections; the other is empty, waiting to receive survivors at the next minor GC. They swap roles each time. | Lesson 04 |
+| Minor GC | A collection of the young generation only, run when Eden fills. Copies live objects to a survivor space (or promotes them) and empties Eden in one step. Never reclaims anything in the old generation. | Lesson 04 |
+| Object age | How many collections an object has survived, stored in a few bits of its header (four bits in HotSpot, so at most 15). | Lesson 04 |
+| Promotion (tenuring) | Moving an object from the young generation into the old generation. | Lesson 04 |
+| Tenuring threshold | The age at which an object is promoted. At most 15 in HotSpot; set with `-XX:MaxTenuringThreshold`, and the JVM may lower it on its own when survivor spaces get crowded. | Lesson 04 |
+| Premature promotion | Short-lived objects pushed into the old generation too early — typically because the survivor space overflowed. Fills the old generation with garbage that is expensive to collect. | Lesson 04 |
+| Old generation (tenured generation) | Where promoted, long-lived objects live. Fills slowly, collected rarely and expensively. | Lesson 04 |
+| Card table / write barrier | How a minor GC finds old objects that point at young ones without scanning the whole old generation: a small piece of code the JIT adds to every reference store (the write barrier) marks that slice of the old generation "dirty" in a table (the card table), and only dirty slices are scanned. | Lesson 04 |
+| Major GC / full GC | A major GC collects the old generation; a full GC collects the whole heap (often Metaspace too) and is usually the longest pause. The terms are used loosely in practice. | Lesson 04 |
+| Weak reference (`WeakReference`) | A reference that points at an object without counting toward its reachability. Once only weak references remain, the collector may reclaim the object, and `get()` returns `null`. | Lesson 04 |
+| `Reference.reachabilityFence` | A call (Java 9+) that keeps an object reachable up to that exact line. Needed because scope is a compile-time idea and the JIT may treat a variable as dead after its last use. | Lesson 04 |
+| `WeakHashMap` | A JDK map whose keys are held weakly, so an entry disappears once nothing else references its key. Trap: a value that refers back to its own key keeps the entry forever. | Lesson 04 |
+| `finalize()` / `Cleaner` | `finalize()` was meant to run when an object became garbage; it is unpredictable, slows the GC, and was deprecated for removal in Java 18 (JEP 421). `java.lang.ref.Cleaner` is the last-resort replacement; try-with-resources is the normal answer. | Lesson 04 |
+| `GarbageCollectorMXBean` | The monitoring object for one collector, reporting how many collections it has run and how many milliseconds they took in total. | Lesson 04 |
+| Serial collector | HotSpot's simplest collector (`-XX:+UseSerialGC`), single-threaded, whose layout — one Eden, two survivor spaces, one old generation — matches the textbook picture exactly. Its collectors report as `Copy` and `MarkSweepCompact`. | Lesson 04 |

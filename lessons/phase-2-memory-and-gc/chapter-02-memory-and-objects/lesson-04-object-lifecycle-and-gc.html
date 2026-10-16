@@ -1,0 +1,866 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lesson 04 — Object Lifecycle &amp; GC Fundamentals · JVM Internals &amp; Memory</title>
+  <link rel="stylesheet" href="../../assets/lesson.css">
+</head>
+<body>
+<div class="page">
+
+  <!-- ============================ TOC SIDEBAR ============================ -->
+  <aside class="toc">
+    <p class="toc-title">On this page</p>
+    <ol>
+      <li><a href="#s1">1 · The pain</a></li>
+      <li><a href="#s2">2 · Real-world analogy</a></li>
+      <li><a href="#s3">3 · The concept</a></li>
+      <li><a href="#s4">4 · Applied to jvm-explorer</a></li>
+      <li><a href="#s5">5 · In the wild</a></li>
+      <li><a href="#s6">6 · Gotchas</a></li>
+      <li><a href="#s7">7 · Key takeaways</a></li>
+      <li><a href="#s8">8 · Challenge</a></li>
+      <li><a href="#s9">9 · Almanac update</a></li>
+      <li><a href="#s10">10 · What is next</a></li>
+    </ol>
+    <nav class="toc-nav" aria-label="Course navigation">
+      <a class="navcard" href="lesson-03-runtime-memory-areas.html">
+        <span class="navkicker">← Prev · Lesson 03</span>
+        <span class="navtitle">Runtime Memory Areas</span>
+      </a>
+      <a class="navmap" href="../../index.html">↑ Course map</a>
+      <span class="navcard disabled">
+        <span class="navkicker">Next · Lesson 05 →</span>
+        <span class="navtitle">GC algorithms &amp; reading GC logs</span>
+        <span class="navnote">not yet written</span>
+      </span>
+    </nav>
+  </aside>
+
+  <!-- ============================ MAIN CONTENT ============================ -->
+  <main>
+
+    <header class="banner">
+      <p class="kicker">Core Java · Course 01 · JVM Internals &amp; Memory</p>
+      <h1>Lesson 04 — Object Lifecycle &amp; GC Fundamentals</h1>
+      <p class="subtitle">When does an object become garbage, who decides, and why does the heap split itself into young and old? The rule of reachability, and the bet that most objects die young.</p>
+      <p class="meta">
+        <strong>Position:</strong> Lesson 04 of 07 &nbsp;·&nbsp;
+        <strong>Prerequisites:</strong> <a href="lesson-03-runtime-memory-areas.html">Lesson 03 — Runtime Memory Areas</a> &nbsp;·&nbsp;
+        <strong>Project files:</strong> <code>gc/Generation.java</code>, <code>gc/CollectorReading.java</code>, <code>gc/GcStats.java</code>, <code>gc/AllocationPatterns.java</code>, <code>gc/ReachabilityProbe.java</code>, <code>experiments/GenerationsExperiment.java</code>, <code>JvmExplorer.java</code> (modified), and four test classes
+      </p>
+    </header>
+
+    <!-- ===================== SECTION 1 — THE PAIN ===================== -->
+    <section id="s1">
+      <h2><span class="sec-num">1</span> The pain</h2>
+
+      <p>In <a href="lesson-03-runtime-memory-areas.html">Lesson 03</a> the project held 8 MB, let go of it, and printed the heap again — and the <code>used</code> figure may not have moved at all. That small mystery is the first pain of this lesson, and people meet it constantly. Someone sets a big list to <code>null</code>, watches the memory graph stay flat, decides the release &ldquo;didn't work,&rdquo; and starts sprinkling <code>System.gc()</code> through the code. The program gets slower and the graph still doesn't do what they expect.</p>
+
+      <p>The second pain is a belief: <em>&ldquo;Java has garbage collection, so Java programs can't leak memory.&rdquo;</em> Then a service dies with <code>OutOfMemoryError: Java heap space</code> after six hours of perfectly normal traffic. The cause is one line — a <code>static</code> map used as a cache, gaining one entry per request, never losing any. The garbage collector did nothing wrong. It was <em>forbidden</em> to touch those objects, because something could still reach them. Until you know the exact rule the collector follows, that sentence is impossible to understand.</p>
+
+      <p>The third pain is a freeze. Every few minutes the application stops answering for a fraction of a second, then carries on as if nothing happened. That is the collector at work, and some of its work happens while your code stands still. How often that happens, and how long it lasts, depends entirely on how the collector divides up the heap — which is the second half of this lesson. By the end, your project will prove the reachability rule four different ways, and you will watch real objects survive collections, grow older, and move house.</p>
+    </section>
+
+    <!-- ===================== SECTION 2 — ANALOGY ===================== -->
+    <section id="s2">
+      <h2><span class="sec-num">2</span> Real-world analogy</h2>
+
+      <p>Picture a busy office desk. Papers land on it all day — memos, drafts, printouts. Most of them are read once and are useless within minutes.</p>
+
+      <p>A paper is worth keeping only if you can reach it from something you are <strong>actively working on</strong>: a task in your hands, a folder pinned to the wall, or a paper clipped to one of those. A paper clipped only to <em>another useless paper</em> is useless too, however tightly the two are clipped together.</p>
+
+      <p>Clearing the desk is quick, because you do not sort the rubbish — you only rescue the few papers still connected to live work, put them in a small <strong>tray</strong> beside the desk, and sweep everything else into the bin in one motion. A paper that survives several clearings is clearly long-term, so it gets filed in the big <strong>archive cabinet</strong> and you stop checking it every time. Deep-cleaning the archive is a big job, so you do it rarely.</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>The office</th><th>The JVM</th></tr></thead>
+          <tbody>
+            <tr><td>Things you are actively working on</td><td><strong>GC roots</strong> — live stack frames, static fields, running threads</td></tr>
+            <tr><td>&ldquo;Can I reach this paper by following clips?&rdquo;</td><td><strong>Reachability</strong></td></tr>
+            <tr><td>Two papers clipped together, connected to nothing</td><td>An unreachable <strong>cycle</strong> — still garbage</td></tr>
+            <tr><td>The desk where new papers land</td><td><strong>Eden</strong></td></tr>
+            <tr><td>The small tray beside the desk</td><td>The <strong>survivor spaces</strong></td></tr>
+            <tr><td>The archive cabinet</td><td>The <strong>old generation</strong></td></tr>
+            <tr><td>Quick desk-clearing</td><td>A <strong>minor GC</strong></td></tr>
+            <tr><td>&ldquo;Survived several clearings — file it&rdquo;</td><td><strong>Promotion</strong>, at the <strong>tenuring threshold</strong></td></tr>
+            <tr><td>Deep-cleaning the archive</td><td>A <strong>major / full GC</strong></td></tr>
+            <tr><td>A folder pinned to the wall forever, holding papers nobody reads</td><td>A <strong>memory leak</strong> — reachable, but unwanted</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>Notice that the bin is never sorted. That is the single most important idea in the second half of this lesson: a well-designed collector does work in proportion to what it <em>keeps</em>, not to what it throws away.</p>
+    </section>
+
+    <!-- ===================== SECTION 3 — CONCEPT ===================== -->
+    <section id="s3">
+      <h2><span class="sec-num">3</span> The concept explained</h2>
+
+      <p>We build this in dependency order: what &ldquo;garbage&rdquo; means exactly, why Java programs can still leak, how a collector finds garbage, the observation that makes generations worth having, how the young and old generations work, and how to watch all of it from inside Java.</p>
+
+      <h3>3.1 What &ldquo;garbage&rdquo; actually means</h3>
+
+      <p><a href="lesson-03-runtime-memory-areas.html">Lesson 03</a> established that every object lives on the <span class="term" tabindex="0" data-def="The single pool of memory where every object created with `new` lives. Managed and garbage-collected by the JVM.">heap</span>, and that a variable holds a <span class="term" tabindex="0" data-def="A value that identifies where an object lives on the heap — an arrow, not the object itself. Assignment copies the arrow.">reference</span> — an arrow to the object, not the object itself. Nothing in your code ever frees an object. So somebody has to work out which objects are finished with. That somebody is the <strong>garbage collector</strong> (GC): the part of the JVM that finds objects the program can no longer use and reclaims their memory.</p>
+
+      <p>But what does &ldquo;can no longer use&rdquo; mean, precisely? Before the real answer, here is the obvious one — and why it fails.</p>
+
+      <p><strong>What goes wrong with the obvious answer.</strong> The natural first idea is to <em>count arrows</em>: give each object a counter of how many references point at it, add one whenever a reference is created, subtract one whenever a reference goes away, and free the object when its counter reaches zero. This is called <strong>reference counting</strong>, and some languages really use it. Now run this through it:</p>
+
+      <pre class="code"><code><span class="ty">Node</span> a = <span class="kw">new</span> <span class="ty">Node</span>();
+<span class="ty">Node</span> b = <span class="kw">new</span> <span class="ty">Node</span>();
+a.next = b;          <span class="cmt">// b's counter: 2 (from the variable b, and from a.next)</span>
+b.next = a;          <span class="cmt">// a's counter: 2 (from the variable a, and from b.next)</span>
+a = <span class="kw">null</span>;            <span class="cmt">// a's counter: 1 (b.next still points at it)</span>
+b = <span class="kw">null</span>;            <span class="cmt">// b's counter: 1 (a.next still points at it)</span>
+<span class="cmt">// Nothing in the program can reach either node ever again -</span>
+<span class="cmt">// but both counters are stuck at 1. Under counting, they are never freed.</span></code></pre>
+
+      <p>Two objects pointing at each other — a <strong>cycle</strong> — keep each other's counters above zero forever. Real data is full of cycles: a parent that lists its children while each child points back at its parent; a doubly linked list; a listener that holds the object it listens to. Counting leaks every one of them.</p>
+
+      <p><strong>The real rule: reachability.</strong> Java asks a different question. Instead of &ldquo;does anything point at this object?&rdquo; it asks: <em>&ldquo;can the running program reach this object by following arrows from somewhere it is certainly using?&rdquo;</em> Those starting points — the places the program is certainly using right now — are called <strong>GC roots</strong>. The main ones are:</p>
+
+      <ul>
+        <li><strong>Local variables in every live frame</strong>, on every thread's stack (Lesson 03's frames). A method that is still running is still using its variables.</li>
+        <li><strong>Static fields</strong> of every loaded class. A static field lives as long as its class, which for a normal application is the whole run.</li>
+        <li><strong>The running threads themselves</strong>, plus a few things the JVM holds internally — for example references held by native code. You will rarely need to think about those.</li>
+      </ul>
+
+      <p>An object is <strong>reachable</strong> if there is a chain of references leading to it from at least one root. Everything else is <strong>garbage</strong>, however many arrows point at it from other garbage. In the example above, once <code>a</code> and <code>b</code> are both <code>null</code>, no root leads to either node, so both are garbage — the cycle makes no difference at all. A collector that works by following arrows from the roots is called a <strong>tracing</strong> collector, and every collector in HotSpot is one.</p>
+
+      <figure class="fig">
+        <svg viewBox="0 0 720 330" role="img" aria-label="On the left, the GC roots: a stack frame's local variables and a static field. Arrows lead from the roots to a chain of reachable objects. On the right, separate from everything, two objects point at each other in a cycle, and one more object is pointed at only by them. None of the right-hand objects can be reached from a root, so all three are garbage.">
+          <defs>
+            <marker id="l4ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path class="fig-arrow-h" d="M0,0 L10,5 L0,10 z"/>
+            </marker>
+            <marker id="l4aa" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path class="fig-arrow-accent-h" d="M0,0 L10,5 L0,10 z"/>
+            </marker>
+          </defs>
+
+          <!-- roots -->
+          <rect class="fig-box" x="12" y="20" width="168" height="290" rx="14"/>
+          <text class="fig-label" x="96" y="44" text-anchor="middle">GC ROOTS</text>
+          <rect class="fig-code" x="26" y="60" width="140" height="92" rx="10"/>
+          <text class="fig-small" x="96" y="80" text-anchor="middle">frame: main (live)</text>
+          <text class="fig-mono" x="40" y="106">order  ●</text>
+          <text class="fig-mono" x="40" y="132">count  3</text>
+          <rect class="fig-code" x="26" y="176" width="140" height="58" rx="10"/>
+          <text class="fig-small" x="96" y="198" text-anchor="middle">static field</text>
+          <text class="fig-mono" x="40" y="222">CACHE  ●</text>
+          <text class="fig-small" x="96" y="266" text-anchor="middle">+ running threads,</text>
+          <text class="fig-small" x="96" y="282" text-anchor="middle">JVM-internal references</text>
+
+          <!-- reachable chain -->
+          <rect class="fig-accent2" x="222" y="66" width="104" height="44" rx="9"/>
+          <text class="fig-label" x="274" y="93" text-anchor="middle">Order</text>
+          <rect class="fig-accent2" x="366" y="66" width="104" height="44" rx="9"/>
+          <text class="fig-label" x="418" y="93" text-anchor="middle">Customer</text>
+          <rect class="fig-accent2" x="222" y="184" width="104" height="44" rx="9"/>
+          <text class="fig-label" x="274" y="211" text-anchor="middle">HashMap</text>
+          <rect class="fig-accent2" x="366" y="184" width="104" height="44" rx="9"/>
+          <text class="fig-label" x="418" y="211" text-anchor="middle">Session</text>
+
+          <path class="fig-arrow-accent" d="M150,102 L218,90" marker-end="url(#l4aa)"/>
+          <path class="fig-arrow-accent" d="M328,88 L362,88" marker-end="url(#l4aa)"/>
+          <path class="fig-arrow-accent" d="M150,218 L218,208" marker-end="url(#l4aa)"/>
+          <path class="fig-arrow-accent" d="M328,206 L362,206" marker-end="url(#l4aa)"/>
+
+          <text class="fig-small" x="346" y="146" text-anchor="middle">REACHABLE — kept</text>
+
+          <!-- unreachable island with a cycle -->
+          <rect class="fig-generic" x="530" y="66" width="80" height="44" rx="9"/>
+          <text class="fig-label" x="570" y="93" text-anchor="middle">Node</text>
+          <rect class="fig-generic" x="530" y="184" width="80" height="44" rx="9"/>
+          <text class="fig-label" x="570" y="211" text-anchor="middle">Node</text>
+          <path class="fig-arrow" d="M556,112 L556,180" marker-end="url(#l4ah)"/>
+          <path class="fig-arrow" d="M584,182 L584,114" marker-end="url(#l4ah)"/>
+          <rect class="fig-generic" x="630" y="128" width="78" height="40" rx="9"/>
+          <text class="fig-small" x="669" y="152" text-anchor="middle">byte[]</text>
+          <path class="fig-arrow" d="M612,98 L640,126" marker-end="url(#l4ah)"/>
+
+          <text class="fig-small" x="610" y="262" text-anchor="middle">UNREACHABLE — garbage,</text>
+          <text class="fig-small" x="610" y="278" text-anchor="middle">even though each Node is</text>
+          <text class="fig-small" x="610" y="294" text-anchor="middle">pointed at by the other</text>
+        </svg>
+        <figcaption><strong>Garbage is decided by paths from the roots, not by arrows in general.</strong> Amber = roots (things the program is certainly using); indigo = objects reachable from a root; grey = objects no root can reach. The two <code>Node</code>s point at each other, so counting arrows would keep them forever. Tracing from the roots never reaches them, so they — and the array only they point at — are garbage.</figcaption>
+      </figure>
+
+      <details class="check">
+        <summary>An object is referenced by ten other objects. Can it be garbage?</summary>
+        <div class="answer-body">Yes. If none of those ten objects can be reached from a root, then neither can it, and all eleven are garbage together. The number of arrows pointing at an object says nothing; only whether a path from a root exists matters.</div>
+      </details>
+
+      <h3>3.2 How objects become unreachable — and how Java programs still leak</h3>
+
+      <p>An object stops being reachable when the last path to it from a root is cut. In everyday code that happens in four ways:</p>
+
+      <ul>
+        <li><strong>A method returns.</strong> Its frame is popped, so its local variables stop being roots. This is the most common way by far — every temporary object made inside a method becomes garbage the moment the method finishes, unless it was returned or stored somewhere. (The list made inside <code>replace</code> in Lesson 03's challenge died exactly this way.)</li>
+        <li><strong>A variable is overwritten</strong> — set to <code>null</code>, or pointed at a different object.</li>
+        <li><strong>An object is removed from a collection</strong>, so the list or map no longer points at it.</li>
+        <li><strong>The object that pointed at it becomes unreachable itself</strong> — everything hanging off a garbage object is garbage too.</li>
+      </ul>
+
+      <p>Now the pain from Section 1. <strong>What goes wrong when you trust the collector to read your mind:</strong></p>
+
+      <pre class="code"><code><span class="kw">public final class</span> <span class="ty">PriceService</span> {
+    <span class="cmt">// A static field is a GC root. Everything this map reaches stays alive</span>
+    <span class="cmt">// for as long as the class is loaded - which is the whole run.</span>
+    <span class="kw">private static final</span> <span class="ty">Map</span>&lt;<span class="ty">String</span>, <span class="ty">Quote</span>&gt; CACHE = <span class="kw">new</span> <span class="ty">HashMap</span>&lt;&gt;();
+
+    <span class="ty">Quote</span> <span class="fn">quote</span>(<span class="ty">String</span> requestId) {
+        <span class="ty">Quote</span> q = <span class="fn">calculate</span>(requestId);
+        CACHE.<span class="fn">put</span>(requestId, q);   <span class="cmt">// one entry per request, never removed</span>
+        <span class="kw">return</span> q;
+    }
+}</code></pre>
+
+      <pre class="terminal"><code><span class="cmt">// PREDICTED symptom, hours later:</span>
+<span class="out">java.lang.OutOfMemoryError: Java heap space</span></code></pre>
+
+      <p>Every request ID is unique, so the cache never helps anyone — but every <code>Quote</code> stays reachable through <em>root → static field → map → entry → Quote</em>, and the collector must keep it. That is what a memory leak <em>is</em> in Java: <strong>not</strong> an object the collector forgot, but an object the program no longer needs that is <strong>still reachable</strong>. The collector cannot know you will never ask for request <code>#41,207</code> again; it only knows you still can. The cure is always the same — cut the path: remove entries you no longer need, bound the cache's size, or use a structure designed to forget (Section 5).</p>
+
+      <div class="callout warning">
+        <p><strong>Eligible is not collected.</strong> Cutting the last path makes an object <em>eligible</em> for collection. It does not collect it, and it does not hand memory back to the operating system. The collector runs when <em>it</em> decides — usually when the area new objects are made in fills up (Section 3.5). That is the whole answer to Lesson 03's 8 MB mystery: the chunks became garbage the moment the list was cleared, but they sat in the heap, still counted in <code>used</code>, until the next collection happened to run. <code>System.gc()</code> asks for a collection; the JVM is allowed to ignore the request, and the flag <code>-XX:+DisableExplicitGC</code> makes HotSpot ignore it on purpose.</p>
+      </div>
+
+      <details class="check">
+        <summary>A method creates a 10 MB array in a local variable, uses it, and returns. When does the array become garbage, and when is it collected?</summary>
+        <div class="answer-body">It becomes garbage when the method returns: the frame is popped, the local variable stops being a root, and no other path leads to the array. It is <em>collected</em> whenever the collector next runs — possibly milliseconds later, possibly much later. Between those two moments it still occupies heap and still shows in the <code>used</code> figure.</div>
+      </details>
+
+      <h3>3.3 How a collector actually finds the garbage</h3>
+
+      <p>Every HotSpot collector does two jobs. First it finds the live objects, then it reclaims the rest.</p>
+
+      <p><strong>Finding: marking.</strong> The collector starts at every root and follows every reference, setting a flag on each object it reaches (&ldquo;this one is alive&rdquo;). It follows the references inside those objects in turn, and keeps going until there is nothing new to reach. This walk is called <strong>marking</strong>. Anything left unmarked at the end is garbage. Notice what marking costs: its work is proportional to the number of <em>live</em> objects, because those are the only ones it visits. The garbage is never looked at.</p>
+
+      <p>There is a catch. If your program kept running while the collector walked, it could move a reference from an unvisited object into an already-visited one, and the collector would wrongly decide a live object was garbage. The simplest fix is to pause every application thread while the walk happens. A pause in which all your code stops so the collector can work is called a <strong>stop-the-world pause</strong> — the freeze from Section 1. Modern collectors do much of their work while your code runs, using clever bookkeeping to stay correct, and keep the stop-the-world parts short. Lesson 05 compares how each collector does that.</p>
+
+      <p><strong>Reclaiming: three strategies.</strong> Once the live objects are known, the collector has three basic ways to recover the rest:</p>
+
+      <ul>
+        <li><strong>Sweep:</strong> walk the heap and add every dead object's space to a list of free gaps. Simple, but the free memory ends up scattered in small holes between live objects. Splitting free memory into pieces too small to use is called <strong>fragmentation</strong>, and it can mean a large array fails to fit even though plenty of memory is free in total.</li>
+        <li><strong>Compact:</strong> slide all the live objects together at one end, so the free space becomes one solid block. No fragmentation, but every moved object's references must be updated.</li>
+        <li><strong>Copy:</strong> copy every live object into a separate, empty area, then treat the entire old area as free in one step. Called <strong>copying collection</strong>. It needs spare space to copy into, but it has a wonderful property: its cost depends only on how much is <em>alive</em>. If almost everything is dead, there is almost nothing to copy, and wiping the old area costs nothing.</li>
+      </ul>
+
+      <p>Keep that last property in mind. It is exactly what the next idea exploits.</p>
+
+      <h3>3.4 The generational hypothesis: most objects die young</h3>
+
+      <p><strong>What goes wrong without generations.</strong> Imagine a collector that marks the <em>entire</em> heap every time. Your application holds 3 GB of long-lived data — caches, configuration, loaded reference tables — and creates temporary objects at a furious rate. Every collection walks all 3 GB of live data just to rediscover that it is still alive, in order to clear away a few hundred megabytes of temporaries. The bigger your heap, the longer every single collection takes, even though the long-lived data never changes.</p>
+
+      <p>Engineers who measured real programs noticed a pattern that holds almost everywhere: <strong>most objects die very young.</strong> Think of what a typical method creates — a <code>StringBuilder</code> to build a message, an iterator to walk a list, boxed <code>Integer</code>s, a request object that lives for one web request. Almost all of it is garbage within microseconds or milliseconds. The few objects that survive a while tend to survive a long time. This observation is called the <strong>generational hypothesis</strong> (in its usual form, the <em>weak</em> generational hypothesis). It is called a hypothesis because it is a bet about how programs behave, not a law — but it is a bet that pays off for the overwhelming majority of real Java code.</p>
+
+      <p>The cure follows directly. Keep new objects in their own small area and collect that area often. Because almost everything in it is dead, a copying collection there is very cheap, and it never needs to walk the long-lived data at all. Move the rare survivors somewhere else, and collect that somewhere-else rarely. An area holding objects of roughly the same age is called a <strong>generation</strong>. HotSpot uses two: the <strong>young generation</strong> and the <strong>old generation</strong>.</p>
+
+      <h3>3.5 The young generation: Eden, two survivor spaces, and growing old</h3>
+
+      <p>The young generation is itself split into three parts.</p>
+
+      <p><strong>Eden</strong> is where (almost) every new object is created. Creating an object there is remarkably cheap. Eden is one block of empty memory with a pointer marking where the free part begins; making a new object means handing out the next N bytes and moving the pointer forward by N. That is called <strong>bump-the-pointer allocation</strong>. To stop threads queueing for that one pointer, each thread is handed its own private slice of Eden to bump through, called a <strong>TLAB</strong> (thread-local allocation buffer), so most allocations need no coordination with other threads at all. This is why <code>new</code> in Java is far cheaper than many people assume.</p>
+
+      <p><strong>Two survivor spaces</strong>, usually called S0 and S1 (or &ldquo;from&rdquo; and &ldquo;to&rdquo;), are small, equal areas beside Eden. At any moment one of them holds objects that survived earlier collections and the other is empty, waiting.</p>
+
+      <p>When Eden fills up, the JVM runs a collection of the young generation only. That is called a <strong>minor GC</strong>, and it goes like this:</p>
+
+      <ol>
+        <li>All application threads pause (a short stop-the-world pause — short because the young generation is small and mostly dead).</li>
+        <li>Starting from the roots, the collector finds every live object in Eden and in the occupied survivor space.</li>
+        <li>It <em>copies</em> each of those live objects into the empty survivor space, and adds one to each copied object's <strong>age</strong> — the number of collections it has survived, kept in a few bits of the object's header.</li>
+        <li>Eden and the old survivor space now contain nothing but garbage, so both are declared empty in one step. Nothing is swept, and the garbage is never looked at.</li>
+        <li>The two survivor spaces swap roles: the one just filled becomes &ldquo;from&rdquo;, and the one just emptied becomes &ldquo;to&rdquo; for next time.</li>
+      </ol>
+
+      <p>An object that keeps surviving keeps getting copied back and forth, one year older each time. When its age reaches a limit, the next collection copies it into the old generation instead. Moving an object from the young generation to the old one is called <strong>promotion</strong> (or <em>tenuring</em>), and the age limit is called the <strong>tenuring threshold</strong>. Its maximum in HotSpot is 15, because the age is stored in four bits, and it is set with <code>-XX:MaxTenuringThreshold</code>. The JVM may also <em>lower</em> the threshold on its own if the survivor space is getting too full.</p>
+
+      <figure class="fig">
+        <svg viewBox="0 0 720 300" role="img" aria-label="The heap divided into generations. The young generation contains Eden, where new objects are created, and two survivor spaces S0 and S1. During a minor GC, live objects in Eden and the occupied survivor space are copied into the empty survivor space with their age increased, and objects that have reached the tenuring threshold are promoted into the old generation. Eden is then emptied in one step.">
+          <defs>
+            <marker id="l4gh" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path class="fig-arrow-h" d="M0,0 L10,5 L0,10 z"/>
+            </marker>
+            <marker id="l4ga" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path class="fig-arrow-accent-h" d="M0,0 L10,5 L0,10 z"/>
+            </marker>
+          </defs>
+
+          <!-- young generation container -->
+          <rect class="fig-box" x="12" y="24" width="440" height="170" rx="14"/>
+          <text class="fig-label" x="232" y="46" text-anchor="middle">YOUNG GENERATION — collected often (minor GC)</text>
+
+          <rect class="fig-infra" x="28" y="60" width="230" height="118" rx="10"/>
+          <text class="fig-label" x="143" y="82" text-anchor="middle">Eden</text>
+          <text class="fig-small" x="143" y="100" text-anchor="middle">every new object starts here</text>
+          <circle class="fig-generic" cx="62" cy="134" r="11"/>
+          <circle class="fig-generic" cx="96" cy="150" r="9"/>
+          <circle class="fig-accent2" cx="130" cy="132" r="11"/>
+          <circle class="fig-generic" cx="164" cy="152" r="10"/>
+          <circle class="fig-generic" cx="198" cy="134" r="9"/>
+          <circle class="fig-generic" cx="228" cy="154" r="8"/>
+          <text class="fig-small" x="143" y="172" text-anchor="middle">mostly dead by the next minor GC</text>
+
+          <rect class="fig-infra" x="276" y="60" width="78" height="118" rx="10"/>
+          <text class="fig-label" x="315" y="82" text-anchor="middle">S0</text>
+          <text class="fig-small" x="315" y="100" text-anchor="middle">"from"</text>
+          <circle class="fig-accent2" cx="315" cy="136" r="10"/>
+          <text class="fig-small" x="315" y="166" text-anchor="middle">age 2</text>
+
+          <rect class="fig-infra" x="362" y="60" width="78" height="118" rx="10"/>
+          <text class="fig-label" x="401" y="82" text-anchor="middle">S1</text>
+          <text class="fig-small" x="401" y="100" text-anchor="middle">"to" — empty</text>
+          <text class="fig-small" x="401" y="140" text-anchor="middle">survivors</text>
+          <text class="fig-small" x="401" y="156" text-anchor="middle">copied here</text>
+
+          <!-- old generation -->
+          <rect class="fig-code" x="476" y="24" width="232" height="170" rx="14"/>
+          <text class="fig-label" x="592" y="46" text-anchor="middle">OLD GENERATION</text>
+          <text class="fig-small" x="592" y="64" text-anchor="middle">collected rarely (major / full GC)</text>
+          <circle class="fig-accent2" cx="530" cy="104" r="12"/>
+          <circle class="fig-accent2" cx="572" cy="122" r="14"/>
+          <circle class="fig-accent2" cx="618" cy="100" r="11"/>
+          <circle class="fig-accent2" cx="660" cy="128" r="13"/>
+          <circle class="fig-accent2" cx="546" cy="152" r="10"/>
+          <text class="fig-small" x="592" y="182" text-anchor="middle">long-lived objects</text>
+
+          <!-- arrows -->
+          <path class="fig-arrow-accent" d="M140,184 C160,236 360,236 396,184" marker-end="url(#l4ga)"/>
+          <text class="fig-small" x="268" y="250" text-anchor="middle">1 · live Eden objects copied to S1, age 1</text>
+          <path class="fig-arrow-accent" d="M326,64 C340,30 380,30 392,58" marker-end="url(#l4ga)"/>
+          <text class="fig-small" x="360" y="20" text-anchor="middle">2 · S0 survivors copied to S1, age +1</text>
+          <path class="fig-arrow-accent" d="M440,140 L512,140" marker-end="url(#l4ga)"/>
+          <text class="fig-small" x="476" y="216" text-anchor="middle">3 · at the threshold:</text>
+          <text class="fig-small" x="476" y="232" text-anchor="middle">promoted to old</text>
+          <text class="fig-small" x="360" y="284" text-anchor="middle">4 · Eden and S0 now hold only garbage, and are emptied in one step. S0 and S1 swap roles.</text>
+        </svg>
+        <figcaption><strong>One minor GC, in four moves.</strong> Teal = the young generation's three areas; amber = the old generation; indigo dots = live objects; grey dots = garbage. Only the live objects are ever touched — which is why a minor GC is fast when most young objects are dead, and why the generational hypothesis pays off.</figcaption>
+      </figure>
+
+      <p>Two more ways into the old generation exist, and both matter in practice. If the empty survivor space is too small for everything that survived, the overflow goes straight to the old generation, however young it is. That is called <strong>premature promotion</strong>, and it is bad news: short-lived objects end up in the area that is collected rarely and expensively. And very large objects may be created directly in the old generation, skipping the young one entirely, because copying them back and forth would be costly (G1 calls these <em>humongous</em> objects — Lesson 05).</p>
+
+      <p><strong>One gap left to close: references that point backwards.</strong> A minor GC is supposed to look only at the young generation. But an old object can hold a reference to a young one — an old cache gets a brand-new entry, for example. If the minor GC ignored the old generation, it would miss that path and wrongly free the young object. Scanning the whole old generation every time would throw away the entire benefit. So HotSpot keeps a record instead. It divides the old generation into small fixed-size slices called <em>cards</em>, and every time your code stores a reference into an old object, a tiny piece of extra code the JIT adds to that store marks the slice as &ldquo;dirty&rdquo;. That extra code is called a <strong>write barrier</strong>, and the table of dirty marks is the <strong>card table</strong>. During a minor GC, only the dirty cards are scanned as extra roots. A small cost on every reference store buys the ability to collect the young generation alone.</p>
+
+      <details class="check">
+        <summary>Why is a minor GC usually fast even when the heap is several gigabytes?</summary>
+        <div class="answer-body">Because it only deals with the young generation, and within it, it only touches the <em>live</em> objects — copying them to a survivor space. The garbage is never visited; Eden is simply declared empty afterwards. If most young objects are dead (the generational hypothesis), there is very little to copy. The old generation's size barely matters, apart from the dirty cards in the card table.</div>
+      </details>
+
+      <h3>3.6 The old generation, and minor versus major versus full</h3>
+
+      <p>The <strong>old generation</strong> (also called the <em>tenured</em> generation) holds promoted objects. It fills slowly, because only survivors arrive there, and when it gets full enough it must be collected too. Because it is large and mostly alive, collecting it is expensive — this is where the long pauses traditionally come from.</p>
+
+      <p>The vocabulary here is loose in everyday use, so here are the three terms as most people mean them:</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Term</th><th>What it collects</th><th>How often</th><th>Cost</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Minor GC</strong></td><td>the young generation only</td><td>often — whenever Eden fills</td><td>small: proportional to young survivors</td></tr>
+            <tr><td><strong>Major GC</strong></td><td>the old generation</td><td>rarely</td><td>large: the old generation is big and mostly alive</td></tr>
+            <tr><td><strong>Full GC</strong></td><td>the whole heap (young and old), often Metaspace too</td><td>ideally almost never</td><td>the largest; usually a long stop-the-world pause</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout note">
+        <p>Everything above describes the generations <em>logically</em>, and it matches the Serial collector's heap layout exactly: one contiguous Eden, two survivor spaces, one old generation. The default collector since Java 9, <strong>G1</strong>, keeps the same young and old <em>roles</em> but builds them from many equal-sized regions that can change role, and it collects the old generation a piece at a time alongside young collections (&ldquo;mixed&rdquo; collections). ZGC in Java 21 can also run generationally. How each collector really works, and how to choose between them, is Lesson 05. The rules of this lesson — reachability, die young, copy survivors, promote the old — hold for all of them.</p>
+      </div>
+
+      <h3>3.7 Try it: run a tiny generational heap</h3>
+
+      <p>This simulation runs a toy young and old generation. Temporary objects (<code>t</code>) become unreachable straight after they are made; long-lived objects (<code>L</code>) stay reachable until you drop them. Fill Eden and watch a minor GC happen, then watch long-lived objects age and get promoted. Then drop one that is already in the old generation, and notice that no number of minor GCs will clear it. Everything here was explained above; with JavaScript off you have missed nothing.</p>
+
+      <div class="sim">
+        <div class="sim-controls">
+          <div class="sim-group">
+            <span>Allocate</span>
+            <div>
+              <button type="button" class="sim-btn action" id="sim1-temp">new temp object</button>
+              <button type="button" class="sim-btn" id="sim1-long">new long-lived object</button>
+            </div>
+          </div>
+          <div class="sim-group">
+            <span>Make garbage</span>
+            <div>
+              <button type="button" class="sim-btn" id="sim1-drop">drop a long-lived object</button>
+            </div>
+          </div>
+          <div class="sim-group">
+            <span>Collect</span>
+            <div>
+              <button type="button" class="sim-btn" id="sim1-minor">minor GC</button>
+              <button type="button" class="sim-btn" id="sim1-major">full GC</button>
+              <button type="button" class="sim-btn" id="sim1-reset">reset</button>
+            </div>
+          </div>
+        </div>
+        <div class="sim-console" id="sim1-out" aria-live="polite">Allocate some objects to begin.</div>
+        <p class="sim-note">This is a <strong>model</strong> with eight Eden slots, four per survivor space, ten in the old generation and a tenuring threshold of 3. Real heaps hold megabytes, the JVM adjusts the threshold itself, and the default G1 collector uses regions rather than fixed areas. The real authority is your own machine: <code>java -XX:+UseSerialGC -Xmx128m -Xmn32m -XX:MaxTenuringThreshold=3 -cp target/classes com.corejava.jvm.experiments.GenerationsExperiment</code> shows real objects doing this. If the two disagree, the machine is right.</p>
+      </div>
+
+      <script>
+      (function () {
+        // Capacities and the promotion age of the toy heap.
+        var EDEN_CAP = 8, SURV_CAP = 4, OLD_CAP = 10, THRESHOLD = 3;
+        var st;
+
+        function reset() {
+          st = { eden: [], from: [], to: [], old: [], nt: 1, nl: 1,
+                 minor: 0, major: 0, reclaimed: 0, promoted: 0,
+                 log: 'Empty heap. Allocate some objects to begin.' };
+        }
+
+        function span(cls, txt) { return '<span class="' + cls + '">' + txt + '</span>'; }
+
+        // How one object is drawn: dead objects are greyed, survivors show their age.
+        function show(o, withAge) {
+          var label = o.name + (withAge ? '(' + o.age + ')' : '');
+          if (!o.live) { return span('skip', label + '✗'); }
+          return span('ok', label);
+        }
+
+        function row(title, list, cap, withAge) {
+          var parts = [];
+          for (var i = 0; i < list.length; i++) { parts.push(show(list[i], withAge)); }
+          for (var j = list.length; j < cap; j++) { parts.push(span('skip', '·')); }
+          return title + '[ ' + parts.join(' ') + ' ]  ' + list.length + '/' + cap;
+        }
+
+        function render() {
+          var out = document.getElementById('sim1-out');
+          out.innerHTML =
+              row('Eden          ', st.eden, EDEN_CAP, false) + '\n'
+            + row('Survivor from ', st.from, SURV_CAP, true) + '\n'
+            + 'Survivor to   ' + span('skip', '(empty — receives survivors at the next minor GC)') + '\n'
+            + row('Old           ', st.old, OLD_CAP, true) + '\n\n'
+            + 'minor GCs: ' + st.minor + '   full GCs: ' + st.major
+            + '   reclaimed: ' + st.reclaimed + '   promoted: ' + st.promoted + '\n\n'
+            + span('hi', st.log);
+        }
+
+        function fullGc(reason) {
+          var freed = 0;
+          function sweep(list) {
+            var kept = [];
+            for (var i = 0; i < list.length; i++) {
+              if (list[i].live) { kept.push(list[i]); } else { freed++; }
+            }
+            return kept;
+          }
+          st.eden = sweep(st.eden);
+          st.from = sweep(st.from);
+          st.old = sweep(st.old);
+          st.reclaimed += freed;
+          st.major++;
+          st.log = (reason ? reason + ' ' : '') + 'Full GC: the WHOLE heap was traced. '
+                 + freed + ' dead object(s) reclaimed, including any in the old generation. Expensive in a real heap.';
+        }
+
+        function minorGc(reason) {
+          var freed = 0, promotedNow = 0, premature = 0;
+          var candidates = st.from.concat(st.eden);   // older survivors first, then Eden
+          var to = [];
+          for (var i = 0; i < candidates.length; i++) {
+            var o = candidates[i];
+            if (!o.live) { freed++; continue; }        // unreachable: never copied, simply gone
+            if (o.age >= THRESHOLD) {                  // old enough: promoted instead of copied
+              st.old.push(o); promotedNow++;
+            } else if (to.length < SURV_CAP) {         // copied to the empty survivor, one year older
+              o.age++; to.push(o);
+            } else {                                   // survivor space full: premature promotion
+              o.age++; st.old.push(o); promotedNow++; premature++;
+            }
+          }
+          st.eden = [];
+          st.from = to;                                // the spaces swap roles
+          st.minor++;
+          st.reclaimed += freed;
+          st.promoted += promotedNow;
+          var msg = (reason ? reason + ' ' : '') + 'Minor GC: ' + freed + ' dead object(s) reclaimed without being looked at, '
+                  + to.length + ' survivor(s) copied (age +1), ' + promotedNow + ' promoted to old.';
+          if (premature > 0) { msg += ' ' + premature + ' of those were PREMATURE — the survivor space was full.'; }
+          var oldDead = 0;
+          for (var k = 0; k < st.old.length; k++) { if (!st.old[k].live) { oldDead++; } }
+          if (oldDead > 0) { msg += ' ' + oldDead + ' dead object(s) in old were NOT touched — minor GCs never collect the old generation.'; }
+          st.log = msg;
+          if (st.old.length > OLD_CAP) {
+            fullGc('The old generation overflowed, so the JVM ran a full GC.');
+          }
+        }
+
+        function allocate(live) {
+          var prefix = '';
+          if (st.eden.length >= EDEN_CAP) {
+            minorGc('Eden was full, so a minor GC ran before the allocation.');
+            prefix = st.log + ' ';
+          }
+          var o = live ? { name: 'L' + st.nl++, live: true, age: 0 }
+                       : { name: 't' + st.nt++, live: false, age: 0 };
+          st.eden.push(o);
+          st.log = prefix + (live ? o.name + ' created in Eden and kept reachable.'
+                                  : o.name + ' created in Eden — and unreachable a moment later (✗).');
+        }
+
+        function drop() {
+          var areas = [['old', st.old], ['survivor', st.from], ['Eden', st.eden]];
+          for (var a = 0; a < areas.length; a++) {
+            var list = areas[a][1];
+            for (var i = 0; i < list.length; i++) {
+              if (list[i].live && list[i].name.charAt(0) === 'L') {
+                list[i].live = false;
+                st.log = list[i].name + ' (in ' + areas[a][0] + ') is now unreachable.'
+                       + (areas[a][0] === 'old' ? ' It will stay there through any number of minor GCs, until a full GC.' : '');
+                return;
+              }
+            }
+          }
+          st.log = 'No reachable long-lived object to drop. Allocate one first.';
+        }
+
+        document.getElementById('sim1-temp').addEventListener('click', function () { allocate(false); render(); });
+        document.getElementById('sim1-long').addEventListener('click', function () { allocate(true); render(); });
+        document.getElementById('sim1-drop').addEventListener('click', function () { drop(); render(); });
+        document.getElementById('sim1-minor').addEventListener('click', function () { minorGc(''); render(); });
+        document.getElementById('sim1-major').addEventListener('click', function () { fullGc(''); render(); });
+        document.getElementById('sim1-reset').addEventListener('click', function () { reset(); render(); });
+
+        reset();
+        render();
+      })();
+      </script>
+
+      <p>A good sequence to try: three long-lived objects, then enough temp objects to fill Eden several times over. Watch the <code>L</code> objects' ages climb 1, 2, 3 and then jump to old. Then drop one, run a few minor GCs, and see it stay put until you press <em>full GC</em>.</p>
+
+      <h3>3.8 Watching an object without keeping it alive</h3>
+
+      <p>To prove the reachability rule from inside a Java program, we need to check on an object after a collection. But holding an ordinary reference to it would make it reachable — the act of watching would keep it alive. We need a reference that does <em>not</em> count.</p>
+
+      <p>Java provides exactly that. It is a small wrapper object that points at another object without counting toward its reachability. If the only remaining paths to an object go through wrappers like this, the collector may reclaim it, and once it does, asking the wrapper for its object returns <code>null</code>. This is called a <strong>weak reference</strong>, and the class is <code>java.lang.ref.WeakReference</code>:</p>
+
+      <pre class="code"><code><span class="ty">Object</span> strong = <span class="kw">new</span> <span class="ty">Object</span>();                         <span class="cmt">// an ordinary reference: keeps it alive</span>
+<span class="ty">WeakReference</span>&lt;<span class="ty">Object</span>&gt; watcher = <span class="kw">new</span> <span class="ty">WeakReference</span>&lt;&gt;(strong);  <span class="cmt">// watches, does not keep alive</span>
+
+watcher.<span class="fn">get</span>();     <span class="cmt">// the object - while something strong still reaches it</span>
+<span class="cmt">// ... after the last strong path is cut AND a collection has run ...</span>
+watcher.<span class="fn">get</span>();     <span class="cmt">// null</span></code></pre>
+
+      <p>One subtlety turns up the moment you use this, and it surprises nearly everyone. You might think <code>strong</code> keeps its object alive until the end of the block it was declared in. Not necessarily. <strong>Scope</strong> — where a variable's name is valid in the source — is a compile-time idea. Reachability is decided while the program runs, and the JIT is allowed to notice that <code>strong</code> is never used again after a certain line, and to treat it as dead from that point on, even though it is still in scope. For almost all code this changes nothing you could observe. When you are deliberately watching an object, it can make the object vanish early. The fix is <code>Reference.reachabilityFence(strong)</code> (Java 9 and later): a call that does nothing except promise the JVM that the object stays reachable up to that line. The project uses it everywhere it watches an object.</p>
+    </section>
+
+    <!-- ===================== SECTION 4 — APPLIED ===================== -->
+    <section id="s4">
+      <h2><span class="sec-num">4</span> Applied to jvm-explorer</h2>
+
+      <p>The project gains a new package, <code>gc</code>, that proves the reachability rule by observation, reads the collector's own counters, and makes real objects age and get promoted.</p>
+
+      <h3>4.1 What happens, step by step, when the new code runs</h3>
+
+      <ol>
+        <li><code>JvmExplorer.main</code> runs its Lesson 00–03 sections as before, then calls <code>ReachabilityProbe.describe()</code>.</li>
+        <li><strong>Reachable:</strong> the probe makes an object, holds it in a local variable (a root) and watches it through a <code>WeakReference</code>. It requests two collections. The object must survive, and <code>reachabilityFence</code> guarantees the local really counts until the check.</li>
+        <li><strong>Unreachable:</strong> it makes an object that only a weak reference points at — garbage from birth — and requests collections until <code>get()</code> returns <code>null</code>.</li>
+        <li><strong>A cycle:</strong> it builds two <code>Node</code>s pointing at each other, watches both, then sets both local variables to <code>null</code>. The pair still point at each other, but no root reaches them, so both are reclaimed. A reference-counting collector would keep them forever.</li>
+        <li><strong>A leak:</strong> it puts an object in a <code>static</code> list, drops its own local reference, and requests collections. The static field is a root, so the object must survive. Then it clears the list.</li>
+        <li><code>AllocationPatterns.churnUntilCollection</code> reads the collectors' combined total, then makes 64 KB arrays, each one replacing the last in a <code>volatile static</code> field. That turns the previous array into garbage, and also forces the allocation to really happen. After each allocation it re-reads the total. Eden fills, a minor GC runs, the total goes up, and the loop stops and reports how much garbage that took.</li>
+        <li><code>GcStats.describe()</code> prints each collector's name, count and total time, and how many kilobytes Eden, the survivor space and the old generation currently hold.</li>
+      </ol>
+
+      <h3>4.2 The files</h3>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>File</th><th>Its one job</th></tr></thead>
+          <tbody>
+            <tr><td><code>gc/Generation.java</code></td><td>an enum naming Eden, survivor and old, matching each collector's pool names</td></tr>
+            <tr><td><code>gc/CollectorReading.java</code></td><td>a record: one collector's running count and time at one moment</td></tr>
+            <tr><td><code>gc/GcStats.java</code></td><td>reads every collector's counters and each generation's size</td></tr>
+            <tr><td><code>gc/AllocationPatterns.java</code></td><td>short-lived churn, long-lived retention, and churn-until-a-collection</td></tr>
+            <tr><td><code>gc/ReachabilityProbe.java</code></td><td>proves the reachability rule four ways, watching through weak references</td></tr>
+            <tr><td><code>experiments/GenerationsExperiment.java</code></td><td>watches kept objects age in the survivor space, then promote</td></tr>
+            <tr><td><code>JvmExplorer.java</code> (modified)</td><td>a new section printing the reachability report and the collector counters</td></tr>
+            <tr><td>four test classes</td><td>16 new tests, taking the project to <strong>71</strong></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>4.3 Proving the rule: the cycle</h3>
+
+      <pre class="code"><code><span class="kw">public static boolean</span> <span class="fn">unreachableCycleIsCollected</span>() {
+    <span class="ty">Node</span> first = <span class="kw">new</span> <span class="ty">Node</span>();
+    <span class="ty">Node</span> second = <span class="kw">new</span> <span class="ty">Node</span>();
+
+    <span class="cmt">// The cycle: a collector that counted incoming arrows would see 1 for each, forever.</span>
+    first.next = second;
+    second.next = first;
+
+    <span class="ty">WeakReference</span>&lt;<span class="ty">Node</span>&gt; watchFirst = <span class="kw">new</span> <span class="ty">WeakReference</span>&lt;&gt;(first);
+    <span class="ty">WeakReference</span>&lt;<span class="ty">Node</span>&gt; watchSecond = <span class="kw">new</span> <span class="ty">WeakReference</span>&lt;&gt;(second);
+
+    <span class="cmt">// Cut the only paths from a root. The nodes still point at each other.</span>
+    first = <span class="kw">null</span>;
+    second = <span class="kw">null</span>;
+
+    <span class="cmt">// Tracing starts at the roots, never reaches the pair, and reclaims both.</span>
+    <span class="kw">return</span> <span class="fn">requestGcUntilCleared</span>(watchFirst, DEFAULT_GC_ATTEMPTS)
+            &amp;&amp; <span class="fn">requestGcUntilCleared</span>(watchSecond, DEFAULT_GC_ATTEMPTS);
+}</code></pre>
+
+      <h3>4.4 Forcing a collection without <code>System.gc()</code></h3>
+
+      <pre class="code"><code><span class="cmt">// Every short-lived object is written here, then overwritten by the next one.</span>
+<span class="cmt">// Escaping into a field stops the JIT optimising the allocation away (Lesson 06).</span>
+<span class="kw">private static volatile</span> <span class="ty">Object</span> sink;
+
+<span class="kw">public static long</span> <span class="fn">churnUntilCollection</span>(<span class="kw">int</span> objectBytes, <span class="kw">long</span> capBytes) {
+    <span class="kw">long</span> before = GcStats.<span class="fn">totalCollectionCount</span>();
+    <span class="kw">long</span> allocated = <span class="num">0</span>;
+    <span class="kw">while</span> (allocated &lt; capBytes) {
+        sink = <span class="kw">new byte</span>[objectBytes];              <span class="cmt">// the previous array is garbage now</span>
+        allocated += objectBytes;
+        <span class="kw">if</span> (GcStats.<span class="fn">totalCollectionCount</span>() &gt; before) {
+            sink = <span class="kw">null</span>;
+            <span class="kw">return</span> allocated;                     <span class="cmt">// Eden filled; a collection ran</span>
+        }
+    }
+    sink = <span class="kw">null</span>;
+    <span class="kw">return</span> -<span class="num">1</span>;                                    <span class="cmt">// no collection within the cap</span>
+}</code></pre>
+
+      <p>Why is a collection guaranteed before the cap? The cap is four times the heap's ceiling, and garbage beyond the ceiling has nowhere to go — the JVM <em>must</em> collect to make room. In practice the first minor GC arrives as soon as Eden fills, long before that.</p>
+
+      <h3>4.5 The tests</h3>
+
+      <p>The test file for the probe states plainly that its claims are not all equally strong. &ldquo;A reachable object is never collected&rdquo; is a <strong>guarantee</strong> of the Java specification, so those tests cannot fail on a correct JVM. &ldquo;An unreachable object <em>is</em> collected&rdquo; is <strong>not</strong> guaranteed, because <code>System.gc()</code> is only a request. Those tests rely on HotSpot honouring it, which it does by default.</p>
+
+      <pre class="code"><code><span class="cmt">// GUARANTEED: a static field is a root, so whatever it reaches stays alive.</span>
+<span class="anno">@Test</span>
+<span class="kw">void</span> <span class="fn">anObjectHeldByAStaticFieldIsNeverCollected</span>() {
+    <span class="fn">assertTrue</span>(ReachabilityProbe.<span class="fn">objectHeldByStaticFieldSurvives</span>(), <span class="cmt">/* … */</span>);
+}
+
+<span class="cmt">// RELIES ON System.gc() being honoured: a cycle reachable from no root is garbage.</span>
+<span class="cmt">// This is the test a reference-counting collector would fail.</span>
+<span class="anno">@Test</span>
+<span class="kw">void</span> <span class="fn">anUnreachableCycleIsCollected</span>() {
+    <span class="fn">assertTrue</span>(ReachabilityProbe.<span class="fn">unreachableCycleIsCollected</span>(),
+            <span class="str">"... If this fails, check that -XX:+DisableExplicitGC is not set."</span>);
+}
+
+<span class="cmt">// GUARANTEED by logic: garbage beyond the heap ceiling must force a collection.</span>
+<span class="anno">@Test</span>
+<span class="kw">void</span> <span class="fn">enoughGarbageAlwaysForcesACollection</span>() {
+    <span class="kw">long</span> before = GcStats.<span class="fn">totalCollectionCount</span>();
+    <span class="kw">long</span> garbage = AllocationPatterns.<span class="fn">churnUntilCollection</span>(
+            AllocationPatterns.DEFAULT_OBJECT_BYTES, AllocationPatterns.<span class="fn">safeCapBytes</span>());
+    <span class="fn">assertTrue</span>(garbage &gt; <span class="num">0</span>, <span class="cmt">/* … */</span>);
+    <span class="fn">assertTrue</span>(GcStats.<span class="fn">totalCollectionCount</span>() &gt; before, <span class="cmt">/* … */</span>);
+}</code></pre>
+
+      <p>No test asserts <em>when</em> promotion happens, how many collections have run, or how big any generation is. Those depend on the collector, the machine and everything that ran earlier in the same test JVM — they are observations for your terminal, not facts for a test.</p>
+
+      <h3>4.6 Predicted output and the commands to check it</h3>
+
+      <pre class="terminal"><code><span class="cmt"># everything below runs from inside jvm-explorer/</span>
+mvn test</code></pre>
+
+      <pre class="terminal"><code><span class="cmt">// PREDICTED (trimmed; Surefire's class order may differ)</span>
+[INFO] Running com.corejava.jvm.gc.AllocationPatternsTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0
+[INFO] Running com.corejava.jvm.gc.GcStatsTest
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0
+[INFO] Running com.corejava.jvm.gc.ReachabilityProbeTest
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0
+[INFO] Running com.corejava.jvm.experiments.GenerationsExperimentTest
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0
+<span class="cmt">... and the twelve test classes from Lessons 00-03, unchanged ...</span>
+[INFO] <span class="out">Tests run: 71, Failures: 0, Errors: 0, Skipped: 0</span>
+[INFO] BUILD SUCCESS</code></pre>
+
+      <pre class="terminal"><code>mvn compile exec:java</code></pre>
+
+      <pre class="terminal"><code><span class="cmt">// PREDICTED — the Lesson 04 sections only. Collector names are G1's (the default);</span>
+<span class="cmt">// counts, times and sizes WILL differ on your machine.</span>
+--- object lifecycle: reachability decides what is garbage ---
+<span class="out">reachable object survives a GC request : true</span>
+<span class="out">unreachable object is collected         : true</span>
+<span class="out">unreachable CYCLE is collected          : true</span>
+<span class="out">object held by a static list survives   : true</span>
+
+--- generations: the collector's own counters ---
+garbage made before the next collection : 21 MB
+collector  G1 Young Generation: 4 collections, 9 ms total
+collector  G1 Concurrent GC: 0 collections, 0 ms total
+collector  G1 Old Generation: 6 collections, 38 ms total
+generations  eden 2048 KB | survivor 0 KB | old 3712 KB</code></pre>
+
+      <p>Two things in that prediction look odd and are not. <strong>&ldquo;G1 Old Generation: 6 collections&rdquo;</strong> — those are the full collections our own probe requested with <code>System.gc()</code>, which HotSpot's G1 performs as full GCs. And the exact list of collector names (including whether a separate &ldquo;Concurrent GC&rdquo; entry appears) varies by JDK version, so treat the names as something to verify on yours.</p>
+
+      <div class="callout tryit">
+        <p>Run <code>mvn test</code> from <code>jvm-explorer/</code> and check for <strong>71 tests, all green</strong>, then <code>mvn compile exec:java</code> and check that all four reachability lines say <code>true</code>. If anything differs, the machine is right — tell me what you saw and we will work out why.</p>
+      </div>
+
+      <p>Now watch objects age. This needs a clean JVM with specific flags, so run <code>java</code> directly rather than through Maven. The flags choose the Serial collector, whose layout matches the diagram in Section 3.5 exactly. They also fix the young generation at 32 MB, so each survivor space is about 3.2 MB (HotSpot's default split is 8 : 1 : 1), and set the promotion age to 3, so the jump arrives quickly:</p>
+
+      <pre class="terminal"><code>mvn compile
+java -XX:+UseSerialGC -Xmx128m -Xmn32m -XX:MaxTenuringThreshold=3 -cp target/classes com.corejava.jvm.experiments.GenerationsExperiment</code></pre>
+
+      <pre class="terminal"><code><span class="cmt">// PREDICTED SHAPE — exact kilobytes and the exact round of the jump will differ</span>
+=== generations experiment: watch objects age and promote ===
+collector: Copy
+collector: MarkSweepCompact
+keeping 16 objects of 64 KB reachable for the whole run
+
+round   collections       survivor            old
+start             0           0 KB           0 KB
+1                 1        1150 KB           0 KB
+2                 2        1090 KB           0 KB
+3                 3        1090 KB           0 KB
+<span class="out">4                 4          70 KB        1080 KB</span>
+5                 5          70 KB        1080 KB
+6                 6          70 KB        1080 KB
+
+Expected shape: about 1 MB sits in survivor for a few rounds, then moves to old in one jump.</code></pre>
+
+      <p>Read it as a story. Our 1 MB of kept objects was created in Eden. Collection 1 copies it into a survivor space at age 1; collections 2 and 3 copy it across again at ages 2 and 3. At collection 4 the objects have reached the threshold, so they are copied into the old generation instead — survivor drops, old jumps by about 1 MB, in one step. After that the old generation stays flat, because minor GCs never touch it. The small amounts left in survivor are the last garbage array that happened to be reachable when each collection ran, plus a few JDK objects.</p>
+
+      <p>To see the JVM's own account of the same events, add two logging switches (unified logging, Java 9 and later). <code>gc</code> prints one line per collection, and <code>gc+age=trace</code> prints the age table each time:</p>
+
+      <pre class="terminal"><code>java -XX:+UseSerialGC -Xmx128m -Xmn32m -XX:MaxTenuringThreshold=3 -Xlog:gc,gc+age=trace -cp target/classes com.corejava.jvm.experiments.GenerationsExperiment</code></pre>
+
+      <pre class="terminal"><code><span class="cmt">// PREDICTED SHAPE of the log lines (exact wording to verify on your JDK)</span>
+[0.214s][info][gc] GC(0) Pause Young (Allocation Failure) 26M-&gt;1M(123M) 3.912ms
+[0.214s][trace][gc,age] GC(0) Age table with threshold 3 (max threshold 3)
+[0.214s][trace][gc,age] GC(0) - age   1:    1178624 bytes,    1178624 total</code></pre>
+
+      <p>&ldquo;Pause Young&rdquo; is a minor GC. &ldquo;Allocation Failure&rdquo; is the reason: Eden had no room for the next object. <code>26M-&gt;1M(123M)</code> means heap used before → after, with the committed size in brackets — 25 MB of garbage reclaimed in about 4 milliseconds, without the collector ever looking at it. Reading these lines properly is Lesson 05.</p>
+
+      <div class="callout tryit">
+        <p>Run the experiment and compare with the prediction. Then try <code>-XX:MaxTenuringThreshold=1</code> (the jump should arrive at round 2) and <code>-XX:MaxTenuringThreshold=6</code> (later, if at all within six rounds). <strong>Project state: compiles, 71 tests green</strong> (predicted). Every number here is your machine's to give; if the shape contradicts the prediction, the machine wins — tell me what you saw.</p>
+      </div>
+    </section>
+
+    <!-- ===================== SECTION 5 — IN THE WILD ===================== -->
+    <section id="s5">
+      <h2><span class="sec-num">5</span> In the wild</h2>
+
+      <p>The JDK ships a map built on weak references: <code>java.util.WeakHashMap</code>. Its <em>keys</em> are held weakly. When nothing else in the program references a key any more, the collector may reclaim it, and the map quietly drops that entry. It is a cache that forgets on its own — exactly the cure for Section 3.2's leak, in the right situations. A classic use is attaching extra data to objects you do not own, without keeping those objects alive.</p>
+
+      <p>It also has a famous trap, and the trap is pure reachability. If a <em>value</em> holds a reference back to its own <em>key</em>, the entry never disappears: the map holds the value strongly, the value holds the key strongly, so the key is always reachable — through the map itself.</p>
+
+      <pre class="code"><code><span class="ty">Map</span>&lt;<span class="ty">Customer</span>, <span class="ty">Report</span>&gt; reports = <span class="kw">new</span> <span class="ty">WeakHashMap</span>&lt;&gt;();
+reports.<span class="fn">put</span>(customer, <span class="kw">new</span> <span class="ty">Report</span>(customer));  <span class="cmt">// the Report points back at its key...</span>
+<span class="cmt">// ...so this entry is never removed, however unused customer becomes. A leak.</span></code></pre>
+
+      <div class="callout realworld">
+        <p>In production, GC tuning starts with two questions that come straight from this lesson. <em>How fast is the program allocating?</em> That decides how often Eden fills, and so how often minor GCs run. <em>How much survives?</em> That decides how much each minor GC costs, and how fast the old generation fills. A service whose old generation climbs steadily and never comes back down after full GCs has a <strong>leak</strong> — something reachable that should not be. A service whose old generation fills fast but drops back after each full GC is suffering from <strong>premature promotion</strong>, and needs a bigger young generation, not a bigger heap. Telling those two apart in an interview, from a description of a memory graph, is a strong signal.</p>
+      </div>
+    </section>
+
+    <!-- ===================== SECTION 6 — GOTCHAS ===================== -->
+    <section id="s6">
+      <h2><span class="sec-num">6</span> Gotchas and common mistakes</h2>
+      <ul>
+        <li><strong>Calling <code>System.gc()</code> to &ldquo;free memory&rdquo;.</strong> People reach for it because a memory graph did not drop after a release. It is a request the JVM may ignore, and on HotSpot's default settings it triggers a <em>full</em> GC — the most expensive kind, with a long pause — in the middle of your traffic. <em>Avoid it:</em> never call it in application code. If memory is not reclaimed, the question is &ldquo;what still reaches it?&rdquo;, not &ldquo;how do I force the collector?&rdquo;</li>
+        <li><strong>Believing Java cannot leak.</strong> The collector only frees what is unreachable, so anything still reachable stays — however useless. The usual culprits are static collections, caches with no size limit, listeners that are registered and never removed, and <code>ThreadLocal</code> values on pooled threads that live forever. <em>Avoid it:</em> for every long-lived collection, know what removes entries from it.</li>
+        <li><strong>Keeping an outer object alive by accident with an inner class or lambda.</strong> A non-<code>static</code> inner class, an anonymous class, and a lambda that uses any instance field or method all carry a hidden reference to the enclosing <code>this</code>. Register one as a long-lived listener, and the entire outer object — with everything it references — stays reachable for as long as the listener does. <em>Avoid it:</em> make nested classes <code>static</code> unless they truly need the outer object, and unregister listeners when their owner is done.</li>
+        <li><strong>Relying on <code>finalize()</code> to clean up.</strong> A <code>finalize()</code> method was meant to run when an object became garbage, but it runs at an unpredictable time or not at all, slows the collector, and can even bring a dead object back to life. It was deprecated for removal in Java 18 (JEP 421). <em>Avoid it:</em> release files, sockets and locks with try-with-resources (<a href="../../phase-1-foundations/chapter-01-how-java-runs/lesson-01-how-java-runs.html">Lesson 01</a>), and use <code>java.lang.ref.Cleaner</code> only as a last-resort safety net.</li>
+        <li><strong>Assuming an object lives until the end of its variable's scope.</strong> Scope is a compile-time idea. The JIT may treat a variable as dead after its last use, so the object can become collectable earlier than the closing brace. This only matters when you are watching objects (weak references) or when an object guards something outside the heap. <em>Avoid it:</em> use <code>Reference.reachabilityFence(obj)</code> to keep an object reachable up to an exact line.</li>
+      </ul>
+    </section>
+
+    <!-- ===================== SECTION 7 — TAKEAWAYS ===================== -->
+    <section id="s7">
+      <h2><span class="sec-num">7</span> Key takeaways</h2>
+      <ul>
+        <li>An object is garbage when no chain of references leads to it from a GC root — a local variable in a live frame, a static field, or a running thread — so unreachable cycles are garbage too, which is why Java traces from the roots instead of counting references.</li>
+        <li>A Java memory leak is an object the program no longer needs that is still reachable, usually through a static collection, an unbounded cache or a forgotten listener, and the cure is always to cut the path.</li>
+        <li>Cutting the last path makes an object eligible for collection, not collected; the collector runs when it decides, and <code>System.gc()</code> is only a request.</li>
+        <li>Because most objects die young, HotSpot allocates new objects in Eden and collects the young generation often with a copying collection, whose cost depends only on how much survives — the garbage is never even looked at.</li>
+        <li>Each survival raises an object's age, and at the tenuring threshold it is promoted to the old generation, which is collected rarely and expensively; minor GCs never reclaim anything in the old generation.</li>
+      </ul>
+    </section>
+
+    <!-- ===================== SECTION 8 — CHALLENGE ===================== -->
+    <section id="s8">
+      <h2><span class="sec-num">8</span> Challenge</h2>
+
+      <p><strong>Part A — which objects are garbage?</strong> At the line marked <code>// HERE</code>, decide for each of the objects <strong>A</strong> to <strong>F</strong> whether it is reachable or garbage, and say why.</p>
+
+      <pre class="code"><code><span class="kw">public class</span> <span class="ty">Puzzle</span> {
+    <span class="kw">static</span> <span class="ty">List</span>&lt;<span class="ty">Object</span>&gt; registry = <span class="kw">new</span> <span class="ty">ArrayList</span>&lt;&gt;();
+
+    <span class="kw">static class</span> <span class="ty">Box</span> { <span class="ty">Object</span> item; }
+
+    <span class="kw">public static void</span> <span class="fn">main</span>(<span class="ty">String</span>[] args) {
+        <span class="ty">Box</span> a = <span class="kw">new</span> <span class="ty">Box</span>();          <span class="cmt">// object A</span>
+        a.item = <span class="kw">new</span> <span class="ty">Object</span>();       <span class="cmt">// object B</span>
+
+        <span class="ty">Box</span> c = <span class="kw">new</span> <span class="ty">Box</span>();          <span class="cmt">// object C</span>
+        <span class="ty">Box</span> d = <span class="kw">new</span> <span class="ty">Box</span>();          <span class="cmt">// object D</span>
+        c.item = d;
+        d.item = c;
+        c = <span class="kw">null</span>;
+        d = <span class="kw">null</span>;
+
+        registry.<span class="fn">add</span>(<span class="kw">new</span> <span class="ty">Object</span>());  <span class="cmt">// object E</span>
+
+        <span class="fn">helper</span>();                    <span class="cmt">// creates object F inside, and returns nothing</span>
+
+        a.item = <span class="kw">null</span>;
+        <span class="cmt">// HERE</span>
+        System.out.<span class="fn">println</span>(a);
+    }
+
+    <span class="kw">static void</span> <span class="fn">helper</span>() {
+        <span class="ty">Object</span> f = <span class="kw">new</span> <span class="ty">Object</span>();    <span class="cmt">// object F</span>
+    }
+}</code></pre>
+
+      <p><strong>Part B — read two memory graphs.</strong> Two services each have a steadily climbing old generation. In service 1, every full GC brings the old generation back down to about 400 MB, then it climbs again. In service 2, every full GC brings it down a little less than the time before — 400 MB, then 550, then 700. Which one is leaking, what is the other one's problem, and what would you change for each?</p>
+
+      <p><strong>Part C — check yourself on the machine.</strong> Run the generations experiment with <code>-XX:MaxTenuringThreshold=1</code> and predict the round of the jump before you look. Then predict what happens if you shrink the young generation until the survivor space is smaller than 1 MB, with <code>-Xmn8m</code> (each survivor space then about 0.8 MB). Run it and see.</p>
+
+      <details class="answer">
+        <summary>Click to reveal the answer</summary>
+
+        <p><strong>Part A.</strong></p>
+        <ul>
+          <li><strong>A — reachable.</strong> The local variable <code>a</code> is in <code>main</code>'s live frame, so it is a root, and it points at A. (It is also used on the next line, so even the JIT cannot treat it as dead.)</li>
+          <li><strong>B — garbage.</strong> Its only path was <code>a.item</code>, and <code>a.item = null</code> cut it.</li>
+          <li><strong>C and D — garbage.</strong> They point at each other, but both local variables were set to <code>null</code>, so no root reaches either one. The cycle is irrelevant — this is exactly the case reference counting gets wrong.</li>
+          <li><strong>E — reachable.</strong> <code>registry</code> is a static field, so it is a root; the list it points at holds E. This is the shape of a leak: E will stay for the whole run unless something removes it.</li>
+          <li><strong>F — garbage.</strong> Its only reference was the local variable <code>f</code> in <code>helper</code>'s frame, and that frame was popped when <code>helper</code> returned.</li>
+        </ul>
+        <p>Remember the difference between garbage and <em>collected</em>: B, C, D and F are eligible at <code>// HERE</code>, but they will only be reclaimed when a collection next runs. They were all created in Eden, so the next minor GC reclaims them without looking at them.</p>
+
+        <p><strong>Part B.</strong> <strong>Service 2 is leaking.</strong> The level a full GC returns to is the amount of <em>live</em> data, and it keeps rising — something reachable keeps growing. More heap only delays the <code>OutOfMemoryError</code>; the fix is to find what still reaches the growing objects (a heap dump, Lesson 07) and cut the path. <strong>Service 1 is not leaking:</strong> its live data is a stable 400 MB. Its old generation keeps filling with objects that die soon after arriving — the signature of <strong>premature promotion</strong>, where short-lived objects get pushed out of a young generation that is too small, or survivor spaces that overflow. The fix is a larger young generation (or survivor spaces), so those objects die young where they are cheap to collect.</p>
+
+        <p><strong>Part C.</strong> With <code>MaxTenuringThreshold=1</code>, the kept objects go into a survivor space at age 1 on the first collection and are promoted on the second, so the predicted jump is at <strong>round 2</strong>. With <code>-Xmn8m</code>, 1 MB of survivors cannot fit in a survivor space of about 0.8 MB, so the overflow is <strong>promoted prematurely at round 1</strong>, whatever the threshold — survivor stays low and old jumps immediately. That is premature promotion, caused on purpose. (The JVM may also lower the threshold on its own when survivors crowd the space, which pushes in the same direction.) If your machine shows something else, that is the interesting result — tell me what you saw.</p>
+      </details>
+    </section>
+
+    <!-- ===================== SECTION 9 — ALMANAC ===================== -->
+    <section id="s9">
+      <h2><span class="sec-num">9</span> Almanac update</h2>
+      <p>Added to <code>almanac.md</code>: the reachability rule and the list of GC roots; why tracing beats reference counting (cycles); the definition of a Java memory leak and its usual culprits; <em>eligible is not collected</em>, and <code>System.gc()</code> as a request; marking, sweeping, compacting and copying in one line each; the generational hypothesis; Eden, survivor spaces, ageing, the tenuring threshold, promotion and premature promotion; the card table and write barrier; minor versus major versus full GC; weak references and <code>reachabilityFence</code>; and the leak-versus-premature-promotion reading of an old-generation graph.</p>
+    </section>
+
+    <!-- ===================== SECTION 10 — WHAT IS NEXT ===================== -->
+    <section id="s10">
+      <div class="nextup">
+        <p class="kicker">What is next</p>
+        <h2>Lesson 05 — GC algorithms and reading GC logs</h2>
+        <p>We now know <em>what</em> every collector must do. Lesson 05 compares <em>how</em> the real ones do it — Serial, Parallel, G1 and ZGC, and the honest trade-off between pause time and throughput — then turns on GC logging and gives jvm-explorer a module that parses its own log into a readable summary.</p>
+      </div>
+    </section>
+
+    <p class="position">Lesson 04 of 07 — Core Java Course 01: JVM Internals &amp; Memory Management</p>
+
+  </main>
+</div>
+</body>
+</html>
