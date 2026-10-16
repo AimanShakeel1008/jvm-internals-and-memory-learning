@@ -328,3 +328,42 @@ The living cheat-sheet of this course: rules of thumb, contracts, gotchas, and d
 - **Heap after a full GC = live data.** Rising across full GCs → leak. Live data is a property of the program, not the heap size — size `-Xmx` from it, with headroom.
 - **A young GC that frees almost nothing (`120M->118M(128M)`)** means live data nearly fills the heap: too small a heap, or a leak.
 - **A parser for GC logs needs one subtlety:** causes can contain brackets — `(System.gc())`. "Anything except `)`" breaks on it.
+
+---
+
+## Lesson 06 — The JIT Compiler
+
+**Finding hot code:**
+
+- **The JVM profiles before it optimises:** call counts, loop (back-edge) counts, branch directions, and the receiver classes seen at each interface/virtual call.
+- **Tiers:** 0 interpreter · 1 C1 no profiling (trivial methods) · 2 C1 light profiling (C2 busy) · 3 C1 full profiling · 4 C2. **Usual path 0 → 3 → 4.** Thresholds are roughly hundreds of calls for tier 3 and thousands for tier 4 — check real values with `java -XX:+PrintFlagsFinal -version` (`Tier3*`, `Tier4*`), never design around them.
+- **On-stack replacement:** a long loop in a method called once is compiled via the back-edge counter and switched over mid-loop. `%` in the log.
+
+**What C2 does with a hot method:**
+
+- **Inlining first.** Small callees (roughly ≤ 35 bytecode bytes) and hot ones (roughly ≤ 325) are pasted into the caller. **Small methods are free once hot** — never hand-merge them.
+- **Inlining unlocks everything else** (constant folding, dead-code removal, escape analysis) by letting the compiler see across method boundaries.
+- **Call sites:** monomorphic (1 class seen) and bimorphic (2) are inlined behind cheap checks; **megamorphic (3+) is a real virtual call and blocks inlining**. Class hierarchy analysis can drop the check entirely while only one implementation is loaded.
+- **Escape analysis (C2 only, after inlining):** an object that is never returned, stored in a field/static, passed to a non-inlined method or thrown can be **scalar-replaced** (never allocated; fields become locals) and its locks **elided**. Measured in this project: ≈24 bytes per call cold → ≈0 hot; stays ≈24 with `-XX:-DoEscapeAnalysis` or `-XX:TieredStopAtLevel=1`.
+- **So: short-lived local allocation is far cheaper than intuition says.** Do not pool or reuse objects to avoid `new` without measuring — pooling can even make objects live longer and get promoted.
+
+**Speculation and deoptimization:**
+
+- **C2 bets on the profile** (never-taken branches stay untaken, a call site keeps seeing one class, no new implementation loads). Bets are guarded or recorded as dependencies.
+- **A lost bet → deoptimization:** compiled code is *made not entrant*, running frames move back to the interpreter mid-flight, the method re-profiles and recompiles. **Results never change**; only speed dips.
+- **"Made not entrant" at tier 3 = replacement by tier 4 (healthy). At tier 4 = deoptimization.** Repeated tier 4 retirements of one method are worth investigating.
+
+**Warm-up and measurement:**
+
+- **The first run is slow** because of class loading, interpretation, C1 code still profiling, and compilation in progress on background threads.
+- **Never trust a cold single timing.** Use JMH (warm-up iterations, forked JVMs, blackhole). For quick checks: warm up, repeat, consume the result (a sink) so the JIT cannot delete the work.
+- **Deploys need warm-up too:** synthetic traffic before joining the load balancer, delayed readiness, gradual rollout.
+
+**Seeing it:**
+
+- `-XX:+PrintCompilation` columns: `ms  id  attrs(% s ! b n)  tier  Class::method  [@ bci]  (N bytes)  [made not entrant]` — a HotSpot detail, verify on your JDK.
+- Experiment switches: `-XX:-DoEscapeAnalysis`, `-XX:TieredStopAtLevel=1` (C1 only), `-Xint` (no JIT), `-XX:+UnlockDiagnosticVMOptions -XX:+PrintInlining` (very verbose).
+- **Methods over 8,000 bytecode bytes are never JIT-compiled by default** (`DontCompileHugeMethods` / `HugeMethodLimit` — verify). Generated code and giant `switch`es hit this.
+- **Intrinsics:** `System.arraycopy`, many `Math` and `String` methods run hand-tuned machine code — use the standard library rather than reimplementing it.
+- **Code cache full** → "CodeCache is full. Compiler has been disabled" → new hot code stays interpreted; gradual slowdown with no GC cause.
+- **On Windows PowerShell 5.1, `>` writes UTF-16 with a BOM.** Tools reading redirected output must detect it (as `CompilationLogTool.readLines` does) or read garbage.

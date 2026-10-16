@@ -197,3 +197,24 @@ Every term this course introduces, in plain language, with the lesson where it f
 | Regular expression (`Pattern` / `Matcher`) | A compact language for describing the shape of text and pulling named pieces out of it. Used by the project's GC log parser. | Lesson 05 |
 | `@TempDir` | A JUnit 5 annotation giving a test a fresh empty folder that is deleted afterwards, so it can use real files without touching the project. | Lesson 05 |
 | CMS | The old Concurrent Mark Sweep collector (`-XX:+UseConcMarkSweepGC`), removed in Java 14. Its flags are ignored with a warning on modern JVMs. | Lesson 05 |
+| Profiling / profile | Collecting facts about running code — call counts, loop counts, which way branches went, which classes arrived at each call — to guide later compilation. The facts are the profile. | Lesson 06 |
+| Back-edge | A jump back to the top of a loop; counted once per loop iteration, so long loops can trigger compilation even in a method called once. | Lesson 06 |
+| Tier (0–4) | HotSpot's compilation levels: 0 interpreter, 1 C1 no profiling (trivial methods), 2 C1 light profiling, 3 C1 full profiling, 4 C2. The usual path is 0 → 3 → 4. | Lesson 06 |
+| On-stack replacement (OSR) | Compiling a method while one of its loops is running, then moving the running loop's state into the compiled code mid-loop. Marked `%` in `-XX:+PrintCompilation`. | Lesson 06 |
+| Inlining | Copying a called method's body into its caller, removing the call and letting the compiler optimise across the old boundary. Makes small methods free once code is hot. | Lesson 06 |
+| Constant folding | Working out at compile time a value that can only ever be one thing, instead of computing it at run time. Often unlocked by inlining. | Lesson 06 |
+| Monomorphic / bimorphic / megamorphic | A call site through an interface or superclass that has seen one, two, or three-plus receiver classes. The first two can be inlined behind cheap checks; megamorphic calls cannot. | Lesson 06 |
+| Class hierarchy analysis (CHA) | C2's use of the classes loaded so far: if only one class implements an interface, calls can be inlined without a check — a bet recorded as a dependency and undone if another implementation loads. | Lesson 06 |
+| Escape (an object escapes) | An object escapes a method if code outside it could ever reach it: returned, stored in a field or static, passed to a non-inlined method, or thrown. | Lesson 06 |
+| Escape analysis | C2's check, after inlining, of whether each allocation can escape. If not, the object can be removed (scalar replacement) and its locks dropped (lock elision). | Lesson 06 |
+| Scalar replacement | Replacing a non-escaping object by its separate fields held as plain local values — the object is never allocated at all. | Lesson 06 |
+| Lock elision | Removing `synchronized` on an object no other thread can ever see. | Lesson 06 |
+| Speculative optimisation | Compiling on the assumption that past behaviour continues — e.g. a never-taken branch stays untaken, a call site keeps seeing one class — protected by checks or recorded dependencies. | Lesson 06 |
+| Deoptimization | Abandoning compiled code whose assumption broke: it is made not entrant, running frames are converted back to interpreter frames, and the method is later recompiled. Results never change. | Lesson 06 |
+| Made not entrant | `-XX:+PrintCompilation`'s wording for retiring a compiled version. A tier 3 retirement is usually replacement by tier 4 (healthy); a tier 4 retirement is a deoptimization. | Lesson 06 |
+| `-XX:+PrintCompilation` | HotSpot product flag printing one line per compilation or retirement: ms since start, id, attributes (`%` OSR…), tier, `Class::method`, `@ bci` for OSR, bytecode size. | Lesson 06 |
+| Intrinsic | A JDK method HotSpot replaces with built-in, processor-tuned machine code instead of compiling its Java source — e.g. `System.arraycopy`, many `Math` methods. | Lesson 06 |
+| Code cache | The memory region holding JIT-compiled machine code. If full, HotSpot stops compiling ("CodeCache is full. Compiler has been disabled") and runs new hot code interpreted. | Lesson 06 |
+| Pattern matching for `instanceof` | `if (x instanceof Foo f)` — checks the type and gives the converted variable `f` in one step (Java 16+). | Lesson 06 |
+| Byte order mark (BOM) | Marker bytes at the start of a text file announcing its encoding: `FF FE` for UTF-16LE (written by Windows PowerShell 5.1's `>`), `EF BB BF` for UTF-8. | Lesson 06 |
+| `ThreadMXBean` allocated bytes | HotSpot's `com.sun.management.ThreadMXBean.getCurrentThreadAllocatedBytes()` — the running total of bytes the current thread has allocated; a HotSpot extension, not standard Java. | Lesson 06 |

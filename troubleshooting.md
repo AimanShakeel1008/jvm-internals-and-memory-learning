@@ -287,3 +287,35 @@ Decodes the errors this course's setup and lessons are likely to produce, with t
 ### `gc.log` files appear in `jvm-explorer/` and `git status` does not show them
 
 **Intended.** `*.log` is listed in `.gitignore`, because logs are regenerated on every run and do not belong in history.
+
+---
+
+## Lesson 06 — the JIT compiler
+
+### `CompilationLogTool` reports `compilations : 0` for a `jit.log` full of lines
+
+**What it means:** most often the file was written with a text encoding the tool did not expect, or the experiment was run without `-XX:+PrintCompilation`, or through `mvn exec:java` (where the flag never reaches the program's JVM).
+**Fix:** run exactly `java -XX:+PrintCompilation -cp target/classes com.corejava.jvm.experiments.JitExperiment > jit.log` from `jvm-explorer/`. The tool already handles UTF-16 files written by Windows PowerShell's `>`; if a file still parses as nothing, open it and send me one compilation line — the column layout is a HotSpot detail that can differ between JDKs.
+
+### The phase markers and compilation lines in `jit.log` appear slightly out of order
+
+**Not an error.** The program's own `println`s and the JVM's compilation messages are written by different parts of the process, each with its own buffering, and land in the file in nearly — not perfectly — the true order. Read the story as approximate in time.
+
+### Phase 4 of the experiment never reaches 0 bytes per call
+
+**What it means:** escape analysis is not removing the allocation: C2 has not compiled the loop yet (try more batches), or C2 is unavailable (`-XX:TieredStopAtLevel=1`, `-Xint`, or `-XX:-DoEscapeAnalysis` set somewhere — check `JAVA_TOOL_OPTIONS`).
+**Fix:** run with no extra flags first. Reaching close to (rather than exactly) 0 is normal — a few bytes per call can come from other activity on the thread.
+
+### Phase 4 prints `n/a (this JVM cannot report per-thread allocation)`
+
+**What it means:** the JVM does not provide HotSpot's `com.sun.management.ThreadMXBean` extension.
+**Fix:** use a standard HotSpot JDK such as Temurin 21; the measurement is a HotSpot feature, not standard Java.
+
+### No `made not entrant` line for `totalArea` in phase 5b
+
+**Not necessarily an error.** Whether C2 relied on "every Shape is a Square" depends on its own decisions; it may have compiled `totalArea` with a guard instead, or the timing may put the compilation in a different phase. Look for `totalArea` lines across the whole story, and run the experiment twice — this is an observation, not a guarantee.
+
+### `Unrecognized VM option 'PrintInlining'`
+
+**What it means:** it is a *diagnostic* option, which must be unlocked first.
+**Fix:** `-XX:+UnlockDiagnosticVMOptions -XX:+PrintInlining` (in that order). Expect a very large amount of output.

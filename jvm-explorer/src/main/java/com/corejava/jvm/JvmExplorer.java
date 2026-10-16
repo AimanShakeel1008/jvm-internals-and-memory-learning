@@ -23,6 +23,11 @@ import com.corejava.jvm.gc.GcStats;
 import com.corejava.jvm.gc.ReachabilityProbe;
 // Lesson 05's module: reads a GC log this project produced and summarises it.
 import com.corejava.jvm.gclog.GcLogSummaryTool;
+// Lesson 06's modules: the JIT's own status, and an allocation meter that can see
+// escape analysis make an object disappear.
+import com.corejava.jvm.jit.AllocationMeter;
+import com.corejava.jvm.jit.JitStatus;
+import com.corejava.jvm.jit.JitSubjects;
 
 // Path names a file on disk without opening it.
 import java.nio.file.Path;
@@ -202,5 +207,27 @@ public final class JvmExplorer {
         System.out.println();
         System.out.println("--- GC log: the collector's own account, summarised ---");
         System.out.println(GcLogSummaryTool.summarise(Path.of(GcLogSummaryTool.DEFAULT_LOG_FILE)));
+
+        // ---- Lesson 06: the JIT compiler at work -------------------------------
+        // Which compiler this JVM runs, and how much background time it has spent so far.
+        System.out.println();
+        System.out.println("--- the JIT: compiling hot code while the program runs ---");
+        System.out.println(JitStatus.describe());
+
+        // Escape analysis, measured: each call creates an object that never leaves its
+        // method. The first batch runs mostly interpreted or in C1, which really allocate it.
+        System.out.println("bytes per call, first batch     : "
+                + AllocationMeter.format(AllocationMeter.bytesPerCall(100_000, JitSubjects::distanceLoop)));
+
+        // Warm the loop up so C2 compiles it, then measure again. Once C2 has proved the
+        // object never escapes, it stops creating it - predicted: close to 0 bytes per call.
+        for (int warmUp = 0; warmUp < 10; warmUp++) {
+            AllocationMeter.bytesPerCall(100_000, JitSubjects::distanceLoop);
+        }
+        System.out.println("bytes per call, after warm-up   : "
+                + AllocationMeter.format(AllocationMeter.bytesPerCall(100_000, JitSubjects::distanceLoop)));
+        System.out.println("Watch compilation happen: java -XX:+PrintCompilation -cp target/classes "
+                + "com.corejava.jvm.experiments.JitExperiment > jit.log  then  "
+                + "java -cp target/classes com.corejava.jvm.jit.CompilationLogTool jit.log JitSubjects");
     }
 }

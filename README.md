@@ -10,7 +10,7 @@ The course text is a self-contained HTML learning system — open **[`lessons/in
 
 `jvm-explorer/` is a Maven project built to provoke and observe the JVM itself. Lesson by lesson it gains modules that fill heap regions on purpose, trigger and parse GC logs, watch classes load, overflow the stack on demand, and expose JIT behavior.
 
-**Current capabilities (after Lesson 05):**
+**Current capabilities (after Lesson 06):**
 
 - Self-inspection: prints the running JVM's Java version, JVM name (HotSpot), vendor, maximum heap size, and CPU core count.
 - Class file inspection: reads any loaded class's own `.class` bytes off the class path and decodes the eight-byte header — magic number, minor version, and major version turned into a Java release name.
@@ -24,8 +24,9 @@ The course text is a self-contained HTML learning system — open **[`lessons/in
 - Reachability probe: proves the garbage-collection rule four ways by watching objects through weak references — a reachable object survives, an unreachable one is collected, an unreachable *cycle* is collected, and an object held by a static field survives.
 - Garbage-collector counters: reports every collector's collection count and total time, and how much Eden, the survivor space and the old generation currently hold; can produce garbage until a collection is observed.
 - GC log summariser: reads a HotSpot unified-logging GC log (`-Xlog:gc:file=gc.log`) and prints the collector, pause counts by kind, total / average / maximum pause, heap reclaimed, the share of time paused, and a live-data estimate from the heap after the last full GC. `JvmExplorer` summarises `gc.log` automatically when it finds one.
-- Experiments (labelled for-learning-only): a JIT warm-up stopwatch, a class-loading experiment whose markers line up against the JVM's own `-verbose:class` output, a memory-limits experiment that walks up to both the stack wall and the heap wall, a generations experiment that shows kept objects ageing in the survivor space and then being promoted to the old generation, and a repeatable GC workload for producing logs under each collector.
-- Tests: 87 JUnit tests. The build fails loudly if the running JVM is not the pinned Java 21, if class files are not compiled to Java 21, if the two disagree, if any class-initialization rule stops holding, if the reference and memory-reporting rules stop holding, or if the reachability rules stop holding.
+- JIT observation: reports the JIT compiler and its total compile time; measures bytes allocated per call to show escape analysis removing an object (≈24 bytes cold → ≈0 hot); and reads `-XX:+PrintCompilation` output (even UTF-16 files from PowerShell) into a report by tier, OSR and retirement — telling replacement from deoptimization — plus one method's compilation story alongside the program's phase markers.
+- Experiments (labelled for-learning-only): a JIT warm-up stopwatch, a five-phase JIT experiment (cold, warm, OSR, escape analysis, deoptimization), a class-loading experiment whose markers line up against the JVM's own `-verbose:class` output, a memory-limits experiment that walks up to both the stack wall and the heap wall, a generations experiment that shows kept objects ageing in the survivor space and then being promoted to the old generation, and a repeatable GC workload for producing logs under each collector.
+- Tests: 105 JUnit tests. The build fails loudly if the running JVM is not the pinned Java 21, if class files are not compiled to Java 21, if the two disagree, if any class-initialization rule stops holding, if the reference and memory-reporting rules stop holding, or if the reachability rules stop holding.
 
 ## Requirements (pinned for the whole series)
 
@@ -67,6 +68,11 @@ java -XX:+UseSerialGC -Xmx128m -Xmn32m -XX:MaxTenuringThreshold=3 "-Xlog:gc,gc+a
 # produce a GC log, then summarise it (repeat with -XX:+UseSerialGC / UseParallelGC / UseZGC to compare)
 java -Xmx64m -Xlog:gc:file=gc.log -cp target/classes com.corejava.jvm.experiments.GcWorkload
 java -cp target/classes com.corejava.jvm.gclog.GcLogSummaryTool gc.log
+
+# watch the JIT compile, OSR, remove an allocation and deoptimize — then read the story
+java -XX:+PrintCompilation -cp target/classes com.corejava.jvm.experiments.JitExperiment > jit.log
+java -cp target/classes com.corejava.jvm.jit.CompilationLogTool jit.log JitSubjects
+java -XX:-DoEscapeAnalysis -cp target/classes com.corejava.jvm.experiments.JitExperiment
 ```
 
 GC log files (`*.log`) are git-ignored — they are regenerated on every run.
