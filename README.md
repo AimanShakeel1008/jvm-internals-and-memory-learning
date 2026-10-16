@@ -1,32 +1,42 @@
 # Core Java Course 01 — JVM Internals & Memory Management
 
-Course 01 of 19 in the Core Java In-Depth series. Each course is a standalone repository teaching one deep Java topic through one dedicated project. This one covers what actually happens when Java runs: how source becomes bytecode, how classes load, where objects live, how garbage collection works, and how the JIT compiler makes code fast — in plain Java, deliberately without frameworks.
+Course 01 of 19 in the Core Java In-Depth series. Each course is a standalone repository teaching one deep Java topic through one dedicated project. This one covers what actually happens when Java runs: how source becomes bytecode, how classes load, where objects live, how garbage collection works, how the JIT compiler makes code fast, and how to look inside a running JVM — in plain Java, deliberately without frameworks.
+
+**Status: complete — all eight lessons (00–07).**
 
 ## The lessons
 
-The course text is a self-contained HTML learning system — open **[`lessons/index.html`](lessons/index.html)** in any browser (works fully offline, by double-click) to reach the course hub, a "you are here" roadmap, and every lesson. Each lesson is a standalone page sharing one stylesheet, with inline SVG diagrams, occasional interactive simulations, hover-to-define glossary terms, syntax-highlighted code, and a print stylesheet for clean PDF notes. Best viewed in either light or dark mode — the pages adapt.
+The course text is a self-contained HTML learning system — open **[`lessons/index.html`](lessons/index.html)** in any browser (works fully offline, by double-click) to reach the course hub, a roadmap, and every lesson. Each lesson is a standalone page sharing one stylesheet, with inline SVG diagrams, occasional interactive simulations, hover-to-define glossary terms, syntax-highlighted code, and a print stylesheet for clean PDF notes. Best viewed in either light or dark mode — the pages adapt.
+
+| # | Lesson | In one line |
+| --- | --- | --- |
+| 00 | Full Setup | pin every version in committed files and make the machine prove its identity |
+| 01 | How Java Actually Runs | bytecode, the class file's header, `javap`, interpreter versus JIT |
+| 02 | Class Loading | the three loaders, parent delegation, and exactly when a class initializes |
+| 03 | Runtime Memory Areas | stack frames, the shared heap, Metaspace — and both memory walls on purpose |
+| 04 | Object Lifecycle & GC Fundamentals | reachability, how Java still leaks, generations, ageing and promotion |
+| 05 | GC Algorithms & Reading GC Logs | Serial, Parallel, G1, ZGC as trade-offs; a GC log read field by field |
+| 06 | The JIT Compiler | tiers, OSR, inlining, escape analysis measured, deoptimization |
+| 07 | Seeing Inside a Live JVM | `jcmd`, thread dumps, class histograms, heap dumps — catching a planted leak |
+
+`almanac.md` collects every rule of thumb, lesson by lesson, and ends with **the whole course on one page**: the life of one object from `new` to collection.
 
 ## The project: jvm-explorer
 
-`jvm-explorer/` is a Maven project built to provoke and observe the JVM itself. Lesson by lesson it gains modules that fill heap regions on purpose, trigger and parse GC logs, watch classes load, overflow the stack on demand, and expose JIT behavior.
+`jvm-explorer/` is a Maven project built to provoke and observe the JVM itself. `mvn compile exec:java` runs a report with one section per lesson; the `experiments` package holds labelled for-learning-only programs that push the JVM to each behaviour on purpose.
 
-**Current capabilities (after Lesson 06):**
+**Capabilities:**
 
-- Self-inspection: prints the running JVM's Java version, JVM name (HotSpot), vendor, maximum heap size, and CPU core count.
-- Class file inspection: reads any loaded class's own `.class` bytes off the class path and decodes the eight-byte header — magic number, minor version, and major version turned into a Java release name.
-- Disassembly subjects: four deliberately tiny methods (`BytecodeSubject`) built to be read with `javap -c -p`.
-- Class loader reporting: for any class, names the loader that defined it and the full parent chain up to the bootstrap loader.
-- Lazy-initialization demonstration: a witness log records which classes have run their static initializer, showing live that reading a compile-time constant wakes nothing while a static method call wakes its class.
-- Memory region reporting: prints the heap's ceiling, committed size and used size, total non-heap usage, Metaspace usage, and how many classes are currently loaded.
-- Reference semantics demonstration: shows live that a method can change the object it was handed but never the caller's variable, that two names can share one object, and that a copy is a separate object.
-- Stack depth probe: overflows one thread's stack on purpose, catches the error, and reports how many frames fitted — with a fatter-framed variant for comparison.
-- Heap filler: allocates and retains memory either safely up to a budget or, on explicit request, until the JVM throws `OutOfMemoryError` — then releases everything and reports the exact message.
-- Reachability probe: proves the garbage-collection rule four ways by watching objects through weak references — a reachable object survives, an unreachable one is collected, an unreachable *cycle* is collected, and an object held by a static field survives.
-- Garbage-collector counters: reports every collector's collection count and total time, and how much Eden, the survivor space and the old generation currently hold; can produce garbage until a collection is observed.
-- GC log summariser: reads a HotSpot unified-logging GC log (`-Xlog:gc:file=gc.log`) and prints the collector, pause counts by kind, total / average / maximum pause, heap reclaimed, the share of time paused, and a live-data estimate from the heap after the last full GC. `JvmExplorer` summarises `gc.log` automatically when it finds one.
-- JIT observation: reports the JIT compiler and its total compile time; measures bytes allocated per call to show escape analysis removing an object (≈24 bytes cold → ≈0 hot); and reads `-XX:+PrintCompilation` output (even UTF-16 files from PowerShell) into a report by tier, OSR and retirement — telling replacement from deoptimization — plus one method's compilation story alongside the program's phase markers.
-- Experiments (labelled for-learning-only): a JIT warm-up stopwatch, a five-phase JIT experiment (cold, warm, OSR, escape analysis, deoptimization), a class-loading experiment whose markers line up against the JVM's own `-verbose:class` output, a memory-limits experiment that walks up to both the stack wall and the heap wall, a generations experiment that shows kept objects ageing in the survivor space and then being promoted to the old generation, and a repeatable GC workload for producing logs under each collector.
-- Tests: 105 JUnit tests. The build fails loudly if the running JVM is not the pinned Java 21, if class files are not compiled to Java 21, if the two disagree, if any class-initialization rule stops holding, if the reference and memory-reporting rules stop holding, or if the reachability rules stop holding.
+- **Self-inspection** (L00): the running JVM's Java version, JVM name (HotSpot), vendor, maximum heap and CPU cores.
+- **Class file inspection** (L01): decodes any loaded class's eight-byte header — magic number and major/minor version as a Java release name; tiny `BytecodeSubject` methods to read with `javap -c -p`.
+- **Class loading** (L02): any class's defining loader and full parent chain; a witness log that shows live which lines of code wake a class up.
+- **Memory regions** (L03): heap ceiling / committed / used, non-heap, Metaspace and loaded-class count; reference-semantics demonstration; a stack-depth probe; a heap filler that can (on request) exhaust the heap and report the exact `OutOfMemoryError`.
+- **Garbage collection** (L04): a reachability probe proving the GC rule four ways with weak references; every collector's counters and each generation's size.
+- **GC logs** (L05): a parser and summariser for `-Xlog:gc` logs — pause counts by kind, total / average / max pause, share paused, and a live-data estimate.
+- **JIT** (L06): JIT status; an allocation meter that shows escape analysis removing an object (≈24 bytes per call cold → ≈0 hot); a `-XX:+PrintCompilation` reader that tells replacement from deoptimization and narrates one method's compilation story.
+- **Live-JVM tools** (L07): a planted memory leak and its bounded fix; a class-histogram parser and comparison tool that names what grew; an in-process heap dumper.
+- **Experiments:** JIT warm-up, class loading, memory limits, generations, a GC workload, a five-phase JIT experiment, and a long-running leak hunt to attach `jcmd` / `jstack` / VisualVM to.
+- **Tests:** 120 JUnit tests. They fail loudly if the JVM or the compiled class files are not the pinned Java 21, or if any rule the course demonstrates — class initialization, references, reachability, log parsing, the leak and its fix — stops holding. No test asserts on timing or on when the JIT compiles something.
 
 ## Requirements (pinned for the whole series)
 
@@ -38,56 +48,54 @@ The course text is a self-contained HTML learning system — open **[`lessons/in
 
 ## How to run
 
-All commands run from inside `jvm-explorer/`:
+All commands run from inside `jvm-explorer/`. Commands with JVM flags use plain `java`, so the flags reach the program's own JVM rather than Maven's — run `mvn compile` first.
 
 ```bash
 mvn test                 # compile everything and run all tests (the regression check)
-mvn compile exec:java    # run the main program (com.corejava.jvm.JvmExplorer)
+mvn compile exec:java    # the main report: one section per lesson
 mvn clean                # delete generated output (target/) for a fresh build
 
-# run the labelled warm-up experiment instead of the default main class
+# L01 — warm-up, and reading bytecode
 mvn compile exec:java -Dexec.mainClass=com.corejava.jvm.experiments.WarmupExperiment
-
-# read the bytecode of the disassembly samples (after mvn compile)
 javap -c -p target/classes/com/corejava/jvm/BytecodeSubject.class
-javap -v target/classes/com/corejava/jvm/BytecodeSubject.class
 
-# watch the JVM load classes, in a clean JVM (not Maven's) — after mvn compile
-java -cp target/classes com.corejava.jvm.experiments.ClassLoadingExperiment
+# L02 — watch classes load
 java -verbose:class -cp target/classes com.corejava.jvm.experiments.ClassLoadingExperiment
 
-# walk up to the JVM's two memory walls — flags only apply in a clean JVM, so compile first
-java -cp target/classes com.corejava.jvm.experiments.MemoryLimitsExperiment
+# L03 — the two memory walls (the --oom run exhausts the heap on purpose)
 java -Xss256k -cp target/classes com.corejava.jvm.experiments.MemoryLimitsExperiment
 java -Xmx32m -cp target/classes com.corejava.jvm.experiments.MemoryLimitsExperiment --oom
 
-# watch kept objects age through minor collections and get promoted (Serial collector = textbook layout)
-java -XX:+UseSerialGC -Xmx128m -Xmn32m -XX:MaxTenuringThreshold=3 -cp target/classes com.corejava.jvm.experiments.GenerationsExperiment
+# L04 — objects ageing and being promoted (Serial collector = textbook layout)
 java -XX:+UseSerialGC -Xmx128m -Xmn32m -XX:MaxTenuringThreshold=3 "-Xlog:gc,gc+age=trace" -cp target/classes com.corejava.jvm.experiments.GenerationsExperiment
 
-# produce a GC log, then summarise it (repeat with -XX:+UseSerialGC / UseParallelGC / UseZGC to compare)
+# L05 — produce a GC log and summarise it (repeat with -XX:+UseSerialGC / UseParallelGC / UseZGC)
 java -Xmx64m -Xlog:gc:file=gc.log -cp target/classes com.corejava.jvm.experiments.GcWorkload
 java -cp target/classes com.corejava.jvm.gclog.GcLogSummaryTool gc.log
 
-# watch the JIT compile, OSR, remove an allocation and deoptimize — then read the story
+# L06 — watch the JIT, then compare with escape analysis switched off
 java -XX:+PrintCompilation -cp target/classes com.corejava.jvm.experiments.JitExperiment > jit.log
 java -cp target/classes com.corejava.jvm.jit.CompilationLogTool jit.log JitSubjects
 java -XX:-DoEscapeAnalysis -cp target/classes com.corejava.jvm.experiments.JitExperiment
+
+# L07 — hunt the planted leak (needs a second terminal for jcmd)
+java -Xmx256m -cp target/classes com.corejava.jvm.experiments.LeakHunt
+jcmd <pid> GC.class_histogram > histo-before.log      # second terminal; again a minute later as histo-after.log
+java -cp target/classes com.corejava.jvm.live.HistogramDiffTool histo-before.log histo-after.log
+java -Xmx256m -cp target/classes com.corejava.jvm.experiments.LeakHunt --seconds=60 --dump
 ```
 
-GC log files (`*.log`) are git-ignored — they are regenerated on every run.
-
-The last command deliberately exhausts the heap and prints the resulting `OutOfMemoryError`. That is the intended outcome, not a bug — nothing else in the project does it, and no test ever does.
+Two runs above end in `OutOfMemoryError` when asked to (`--oom`, or `LeakHunt` with a small `-Xmx`). That is intended; no test ever does it. Logs (`*.log`) and heap dumps (`*.hprof`) are git-ignored — heap dumps contain every value in memory and must never be committed.
 
 ## Repository layout
 
 ```text
 lessons/            the HTML learning system — start at lessons/index.html
   assets/lesson.css   the one shared stylesheet for every page
-  index.html          course hub + "you are here" roadmap
+  index.html          course hub + roadmap
   <phase>/<chapter>/  standalone lesson HTML pages
 jvm-explorer/       the Maven project the course builds
 glossary.md         every term the course introduces, in plain language
-almanac.md          rules of thumb, contracts, and gotchas, lesson by lesson
+almanac.md          rules of thumb, contracts and gotchas — ends with the whole course on one page
 troubleshooting.md  decodes the errors you are likely to hit, with fixes
 ```

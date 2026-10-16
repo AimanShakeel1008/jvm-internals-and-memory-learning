@@ -319,3 +319,45 @@ Decodes the errors this course's setup and lessons are likely to produce, with t
 
 **What it means:** it is a *diagnostic* option, which must be unlocked first.
 **Fix:** `-XX:+UnlockDiagnosticVMOptions -XX:+PrintInlining` (in that order). Expect a very large amount of output.
+
+---
+
+## Lesson 07 — live JVM tools and heap dumps
+
+### `jcmd` or `jstack` says it cannot attach (`AttachNotSupportedException`, "Unable to open socket file", "access denied")
+
+**What it means:** attaching only works on the same machine, as the same operating-system user that started the JVM — and inside a container, from inside that container.
+**Fix:** run the tool in the same terminal account that started `LeakHunt` (not an elevated/admin one if the JVM was not), or inside the container with `docker exec` / `kubectl exec`. Check the PID with `jps -l` — the JVM may already have exited.
+
+### `jcmd` lists no processes, or not the one you started
+
+**What it means:** the JVM is running as a different user, has already exited (`LeakHunt` stops after 600 s or when Enter is pressed), or a stale temporary folder is confusing the tools.
+**Fix:** start `LeakHunt` again and run `jps -l` from a second terminal *while it is still printing status lines*.
+
+### `HistogramDiffTool` says `nothing grew`
+
+**What it means:** the two histograms show no growth — either they came from the `--fixed` run (correct!), were taken seconds apart, or came from two *different* processes.
+**Fix:** take both from the same PID, about a minute apart, while the leaky `LeakHunt` is running.
+
+### `jcmd <pid> GC.heap_dump leak.hprof` succeeds but the file is nowhere to be found
+
+**What it means:** a relative path is resolved against the **target JVM's** working folder, not your terminal's.
+**Fix:** give a full path, e.g. `jcmd <pid> GC.heap_dump C:\temp\leak.hprof`, or look in the folder where `LeakHunt` was started.
+
+### `Refusing to overwrite an existing heap dump` / `IOException` from `dumpHeap`
+
+**What it means:** HotSpot never overwrites a dump, and the project's `HeapDumper` refuses first with a clearer message. Names must also end in `.hprof`.
+**Fix:** delete or rename the old file, or let `LeakHunt --dump` choose a new name (it includes the PID).
+
+### `LeakHunt` with `-Xmx64m` dies with `OutOfMemoryError: Java heap space`
+
+**Intended** — that is the planted leak reaching its end, which Lesson 07 runs on purpose. With `-XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=oom.hprof` you get the evidence in `oom.hprof`.
+
+### Pressing Enter does not stop `LeakHunt`
+
+**What it means:** some terminals (and IDE run consoles) do not deliver input until a full line is sent, or do not connect standard input at all.
+**Fix:** press Enter in the window where `LeakHunt` is running (not the second terminal); otherwise wait for the time limit, run with `--seconds=60`, or stop it with Ctrl+C.
+
+### A heap dump is very large or slow to take
+
+**Not an error.** A dump is roughly the size of the live heap and pauses the JVM while it is written. Use `--seconds=60` so less has leaked, and remember to delete `.hprof` files when done — they contain every value in memory (and are git-ignored).

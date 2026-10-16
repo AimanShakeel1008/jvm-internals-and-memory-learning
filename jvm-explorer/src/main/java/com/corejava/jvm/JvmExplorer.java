@@ -28,6 +28,9 @@ import com.corejava.jvm.gclog.GcLogSummaryTool;
 import com.corejava.jvm.jit.AllocationMeter;
 import com.corejava.jvm.jit.JitStatus;
 import com.corejava.jvm.jit.JitSubjects;
+// Lesson 07's modules: the planted leak and its bounded fix.
+import com.corejava.jvm.live.FixedRegistry;
+import com.corejava.jvm.live.LeakyRegistry;
 
 // Path names a file on disk without opening it.
 import java.nio.file.Path;
@@ -229,5 +232,33 @@ public final class JvmExplorer {
         System.out.println("Watch compilation happen: java -XX:+PrintCompilation -cp target/classes "
                 + "com.corejava.jvm.experiments.JitExperiment > jit.log  then  "
                 + "java -cp target/classes com.corejava.jvm.jit.CompilationLogTool jit.log JitSubjects");
+
+        // ---- Lesson 07: seeing inside a live JVM, from the outside --------------
+        // Every outside tool (jcmd, jstack, jmap, VisualVM) finds a JVM by its process id.
+        System.out.println();
+        System.out.println("--- seeing inside a live JVM: this process can be examined from outside ---");
+        System.out.println("this JVM's process id (PID)          : " + ProcessHandle.current().pid());
+
+        // The planted leak, in miniature: 50 requests, 50 sessions kept forever.
+        for (int request = 1; request <= 50; request++) {
+            LeakyRegistry.handleRequest(request);
+        }
+        System.out.println("leaky registry after 50 requests     : " + LeakyRegistry.size() + " sessions, about "
+                + (LeakyRegistry.retainedPayloadBytes() / 1024) + " KB held - and it never shrinks");
+
+        // The fix: the same 50 requests into a bounded registry, which evicts the oldest.
+        for (int request = 1; request <= 50; request++) {
+            FixedRegistry.handleRequest(request);
+        }
+        System.out.println("bounded registry after 50 requests   : " + FixedRegistry.size()
+                + " sessions (capacity " + FixedRegistry.CAPACITY + ")");
+
+        // Cut both paths, so this demonstration leaves nothing reachable behind.
+        LeakyRegistry.clear();
+        FixedRegistry.clear();
+        System.out.println("Hunt a real leak: java -Xmx256m -cp target/classes com.corejava.jvm.experiments.LeakHunt");
+
+        System.out.println();
+        System.out.println("=== jvm-explorer: every lesson of course 01 reported ===");
     }
 }

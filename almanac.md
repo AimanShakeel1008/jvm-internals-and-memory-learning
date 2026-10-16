@@ -367,3 +367,77 @@ The living cheat-sheet of this course: rules of thumb, contracts, gotchas, and d
 - **Intrinsics:** `System.arraycopy`, many `Math` and `String` methods run hand-tuned machine code — use the standard library rather than reimplementing it.
 - **Code cache full** → "CodeCache is full. Compiler has been disabled" → new hot code stays interpreted; gradual slowdown with no GC cause.
 - **On Windows PowerShell 5.1, `>` writes UTF-16 with a BOM.** Tools reading redirected output must detect it (as `CompilationLogTool.readLines` does) or read garbage.
+
+---
+
+## Lesson 07 — Seeing Inside a Live JVM
+
+**Finding and attaching:**
+
+- `jps -l` or plain `jcmd` lists running JVMs and their **PIDs**. In Java: `ProcessHandle.current().pid()`.
+- **Attaching works only on the same machine, as the same OS user** (inside a container: inside that container — `docker exec` / `kubectl exec`). Most "cannot attach" errors are a user or container mismatch.
+
+**`jcmd <pid> ...` — learn this one tool first** (`jcmd <pid> help [command]` is the authority on your JDK):
+
+| Command | Shows | Cost |
+| --- | --- | --- |
+| `VM.version` · `VM.flags` · `VM.command_line` | which JVM, which flags | none |
+| `GC.heap_info` | generation sizes now | none |
+| `Thread.print` (= `jstack <pid>`) | thread dump | tiny pause |
+| `GC.class_histogram` (≈ `jmap -histo:live`) | instances & shallow bytes per class | **full GC** |
+| `GC.heap_dump <full path>.hprof` | heap dump file | **pause + big file** |
+| `VM.log output=gc.log what=gc` | GC logging switched on live | none |
+| `Compiler.codecache` | code cache usage | none |
+| `JFR.start` | Flight Recorder (view in JDK Mission Control) | low |
+
+**Thread dumps:**
+
+- **States:** `RUNNABLE` running/ready · `BLOCKED` waiting for a `synchronized` lock · `WAITING` waiting for a signal · `TIMED_WAITING` waiting with a timeout.
+- **Frozen, CPU idle → look for `BLOCKED` threads and "Found one Java-level deadlock".** Fix deadlocks with a consistent lock order.
+- **Take three dumps a few seconds apart.** The same frame in all three = stuck; different frames = busy.
+
+**Class histograms:**
+
+- **Bytes are shallow** — a leaking class's payload usually shows up under `[B` (byte[]) or `[Ljava.lang.Object;`, not under the class itself. Array names are type descriptors (Lesson 01).
+- **One histogram shows what every program looks like. Two histograms minutes apart show the leak:** look for *your own* class growing in step with requests (this project: `HistogramDiffTool before after`).
+
+**Heap dumps:**
+
+- **Three ways:** `jcmd <pid> GC.heap_dump <full path>`; `-XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=<dir>` (**always set this in production**, pointing at storage that survives a restart); `HotSpotDiagnosticMXBean.dumpHeap` (this project's `HeapDumper`; name must end `.hprof`).
+- **Retained size** = what would be freed if the object were collected. The leak's holder (usually a map) has a tiny shallow size and a huge retained size. **Dominator tree** sorts by it.
+- **Path to GC roots** = why it is alive. The first link — usually a static field — names the bug. Fix = a removal rule (remove when done, bound the size, expire by time).
+- **A heap dump contains every value in memory** (passwords, tokens, personal data): store securely, delete when done, never commit (`*.hprof` is git-ignored). It **pauses** the JVM and needs disk ≈ the live heap.
+- **Tools:** JConsole (ships with the JDK), VisualVM (separate download), Eclipse MAT (best for big dumps).
+
+**The investigation order — cheapest evidence first:** GC log / dashboard shows the old generation's floor rising (L05) → two class histograms name a suspect class → one heap dump, taken at a quiet moment → path to GC roots names the field → fix the removal rule → confirm with two flat histograms.
+
+---
+
+## The whole course on one page — the life of one object
+
+`Order order = new Order(id, items);` inside a web request:
+
+| Stage | What happens | Lesson |
+| --- | --- | --- |
+| Compiled | `javac` emits `new` → `dup` → `invokespecial <init>` into a class file stamped major version 65 (Java 21) | 01 |
+| Run | interpreted at first; hot code compiled by C1 then C2 on background threads | 01, 06 |
+| Class loaded | app loader asks platform → bootstrap first, then finds `Order.class`; verify, prepare, resolve; `<clinit>` once; description in Metaspace | 02, 03 |
+| Allocated | bump-the-pointer in this thread's TLAB in Eden; a frame slot holds an **arrow** to it, never the object | 03, 04 |
+| …or never | hot + never escapes → C2 scalar-replaces it: no object at all | 06 |
+| Fate 1: dies young (most objects) | request ends → frame popped → unreachable from every GC root → next minor GC (`Pause Young`) reclaims it without looking at it | 04, 05 |
+| Fate 2: kept on purpose | survives, ages in a survivor space, promoted to old at the tenuring threshold; later reclaimed by a mixed/full collection once released | 04, 05 |
+| Fate 3: kept by mistake | a static map holds it → leak → old-gen floor rises → histograms name the class → heap dump's path to GC roots names the field | 04, 05, 07 |
+| Underneath it all | the pinned Java 21 (L00), so every observation was made on the engine the lessons describe | 00 |
+
+**Ten rules to keep:**
+
+1. **Pin versions in committed files, and make the build check them.** (L00)
+2. **The class file, not the source, is what is portable; Java release = major version − 44.** (L01)
+3. **Delegation means a class is found as high as possible; a class's identity is name + loader; constants are inlined into callers.** (L02)
+4. **A variable is an arrow; Java passes everything by value; the words after the colon in an `OutOfMemoryError` decide the investigation.** (L03)
+5. **Garbage = unreachable from the roots; a leak = reachable but unwanted; eligible is not collected.** (L04)
+6. **Most objects die young, so collect the young generation often and cheaply; promotion is the expensive path.** (L04)
+7. **Every collector trades throughput against pause time; read the count of full GCs, the max pause, and the heap after full GCs — never the average.** (L05)
+8. **Small methods and short-lived local objects are cheap once code is hot; the JIT inlines, removes allocations, and deoptimizes safely when a guess breaks.** (L06)
+9. **Never trust a cold timing.** (L01, L06)
+10. **Look from the outside, cheapest evidence first; treat heap dumps as sensitive data.** (L07)

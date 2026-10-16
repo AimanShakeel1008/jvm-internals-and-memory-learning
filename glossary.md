@@ -218,3 +218,20 @@ Every term this course introduces, in plain language, with the lesson where it f
 | Pattern matching for `instanceof` | `if (x instanceof Foo f)` — checks the type and gives the converted variable `f` in one step (Java 16+). | Lesson 06 |
 | Byte order mark (BOM) | Marker bytes at the start of a text file announcing its encoding: `FF FE` for UTF-16LE (written by Windows PowerShell 5.1's `>`), `EF BB BF` for UTF-8. | Lesson 06 |
 | `ThreadMXBean` allocated bytes | HotSpot's `com.sun.management.ThreadMXBean.getCurrentThreadAllocatedBytes()` — the running total of bytes the current thread has allocated; a HotSpot extension, not standard Java. | Lesson 06 |
+| Process id (PID) | The number the operating system gives each running program. Every JDK diagnostic tool finds a JVM by it. In Java: `ProcessHandle.current().pid()`. | Lesson 07 |
+| `jps` | The JDK tool that lists running JVMs with their PIDs (`-l` for full main-class names). | Lesson 07 |
+| Attaching | Connecting a diagnostic tool to an already-running JVM through a local channel built into HotSpot. Only on the same machine, as the same operating-system user. | Lesson 07 |
+| `jcmd` | The JDK's all-in-one diagnostic tool: `jcmd <pid> <command>` for version, flags, thread dumps, class histograms, heap dumps, logging and more. `jcmd <pid> help` lists everything. | Lesson 07 |
+| Thread dump | A snapshot of every thread's name, state and stack of frames (`jstack <pid>` or `jcmd <pid> Thread.print`). Take three a few seconds apart. | Lesson 07 |
+| Thread state | `RUNNABLE` (running or ready), `BLOCKED` (waiting to enter a `synchronized` block), `WAITING` (waiting indefinitely for a signal), `TIMED_WAITING` (waiting with a timeout, e.g. `sleep`). | Lesson 07 |
+| Deadlock | Two or more threads each holding a lock another needs, so none can ever continue. HotSpot reports simple ones at the end of a thread dump ("Found one Java-level deadlock"). Fixed by a consistent lock order. | Lesson 07 |
+| `jstack` / `jmap` | Older single-purpose tools: `jstack` prints thread dumps; `jmap -histo` prints class histograms and `jmap -dump` writes heap dumps. `jcmd` covers both. | Lesson 07 |
+| Class histogram | Instances and total shallow bytes per class, largest first (`jcmd <pid> GC.class_histogram`, which runs a full GC first). Compare two, minutes apart, to find what grows. | Lesson 07 |
+| Shallow size | The memory an object itself takes — its header and fields — not counting the objects its fields point at. What histograms report. | Lesson 07 |
+| Heap dump (`.hprof`) | A file holding every object on the heap and every reference between them. Taken with `jcmd <pid> GC.heap_dump`, `-XX:+HeapDumpOnOutOfMemoryError`, or `HotSpotDiagnosticMXBean.dumpHeap`. Pauses the JVM, is as big as the live heap, and contains every value in memory. | Lesson 07 |
+| Retained size | How much memory would be freed if one object were collected: the object plus everything reachable only through it. Points at the object holding a leak. | Lesson 07 |
+| Dominator / dominator tree | An object dominates another if every path from the GC roots to it passes through it. Heap-dump tools sort objects by retained size in a dominator tree. | Lesson 07 |
+| Path to GC roots | The chain of references from a GC root down to a chosen object — Lesson 04's reachability, as a query. Answers "why is this still alive?". | Lesson 07 |
+| `-XX:+HeapDumpOnOutOfMemoryError` | Writes a heap dump at the moment an `OutOfMemoryError` occurs (to `-XX:HeapDumpPath`). Standard for production services. | Lesson 07 |
+| JConsole / VisualVM / Eclipse MAT | Visual tools: JConsole ships with the JDK (live graphs); VisualVM is a separate download (monitoring, heap dumps); Eclipse MAT analyses large heap dumps (dominator tree, leak suspects). | Lesson 07 |
+| JDK Flight Recorder (JFR) | An event recorder built into HotSpot, cheap enough for production, started with `jcmd <pid> JFR.start` and viewed in JDK Mission Control. | Lesson 07 |

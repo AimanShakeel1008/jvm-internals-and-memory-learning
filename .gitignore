@@ -10,6 +10,9 @@ target/
 # GC logs written by the Lesson 05 experiments (regenerated on every run)
 *.log
 
+# Heap dumps (Lesson 07): huge, and they contain every value in memory - never commit
+*.hprof
+
 # IDEs
 .idea/
 *.iml

@@ -1,0 +1,591 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lesson 07 — Seeing Inside a Live JVM · JVM Internals &amp; Memory</title>
+  <link rel="stylesheet" href="../../assets/lesson.css">
+</head>
+<body>
+<div class="page">
+
+  <!-- ============================ TOC SIDEBAR ============================ -->
+  <aside class="toc">
+    <p class="toc-title">On this page</p>
+    <ol>
+      <li><a href="#s1">1 · The pain</a></li>
+      <li><a href="#s2">2 · Real-world analogy</a></li>
+      <li><a href="#s3">3 · The concept</a></li>
+      <li><a href="#s4">4 · Applied to jvm-explorer</a></li>
+      <li><a href="#s5">5 · In the wild</a></li>
+      <li><a href="#s6">6 · Gotchas</a></li>
+      <li><a href="#s7">7 · Key takeaways</a></li>
+      <li><a href="#s8">8 · Challenge</a></li>
+      <li><a href="#s9">9 · Almanac update</a></li>
+      <li><a href="#s10">10 · What is next</a></li>
+    </ol>
+    <nav class="toc-nav" aria-label="Course navigation">
+      <a class="navcard" href="../../phase-2-memory-and-gc/chapter-03-gc-and-jit/lesson-06-the-jit-compiler.html">
+        <span class="navkicker">← Prev · Lesson 06</span>
+        <span class="navtitle">The JIT Compiler</span>
+      </a>
+      <a class="navmap" href="../../index.html">↑ Course map</a>
+      <span class="navcard disabled">
+        <span class="navkicker">Next →</span>
+        <span class="navtitle">End of course 01</span>
+        <span class="navnote">the series continues with course 02</span>
+      </span>
+    </nav>
+  </aside>
+
+  <!-- ============================ MAIN CONTENT ============================ -->
+  <main>
+
+    <header class="banner">
+      <p class="kicker">Core Java · Course 01 · JVM Internals &amp; Memory</p>
+      <h1>Lesson 07 — Seeing Inside a Live JVM</h1>
+      <p class="subtitle">Look into a running JVM from the outside without stopping it: list it, read its threads, count its objects, photograph its whole heap — and use all of it to catch a memory leak planted on purpose. Then the whole course, joined up.</p>
+      <p class="meta">
+        <strong>Position:</strong> Lesson 07 of 07 — the final lesson &nbsp;·&nbsp;
+        <strong>Prerequisites:</strong> <a href="../../phase-2-memory-and-gc/chapter-02-memory-and-objects/lesson-03-runtime-memory-areas.html">Lesson 03</a>, <a href="../../phase-2-memory-and-gc/chapter-02-memory-and-objects/lesson-04-object-lifecycle-and-gc.html">Lesson 04</a> &nbsp;·&nbsp;
+        <strong>Project files:</strong> <code>live/LeakyRegistry.java</code>, <code>live/FixedRegistry.java</code>, <code>live/HistogramRow.java</code>, <code>live/ClassGrowth.java</code>, <code>live/ClassHistogram.java</code>, <code>live/HistogramDiffTool.java</code>, <code>live/HeapDumper.java</code>, <code>experiments/LeakHunt.java</code>, <code>JvmExplorer.java</code> and <code>.gitignore</code> (modified), and four test classes
+      </p>
+    </header>
+
+    <!-- ===================== SECTION 1 — THE PAIN ===================== -->
+    <section id="s1">
+      <h2><span class="sec-num">1</span> The pain</h2>
+
+      <p>Three earlier lessons ended an explanation with the same words: <em>take a heap dump (Lesson 07)</em>. <a href="../../phase-2-memory-and-gc/chapter-02-memory-and-objects/lesson-03-runtime-memory-areas.html">Lesson 03</a> said <code>OutOfMemoryError: Java heap space</code> means something is still holding objects — <em>what?</em> <a href="../../phase-2-memory-and-gc/chapter-02-memory-and-objects/lesson-04-object-lifecycle-and-gc.html">Lesson 04</a> said a leak is an object that is reachable but unwanted — <em>reachable from where?</em> <a href="../../phase-2-memory-and-gc/chapter-03-gc-and-jit/lesson-05-gc-algorithms-and-logs.html">Lesson 05</a> said rising live data after full GCs means a leak — <em>made of which objects?</em></p>
+
+      <p>Every module in this course so far answered questions by having the program <strong>report on itself</strong>. Real incidents do not let you do that. A production service has been running for four days and its memory is climbing; or it has frozen, with the CPU idle and requests piling up. You cannot add a <code>println</code> and redeploy — the problem may take days to come back. You cannot attach a debugger to production and pause it for an hour. And the most tempting move, restarting it, destroys the one thing you need: the running process, with the evidence inside it.</p>
+
+      <p>So the last skill in this course is looking inside a running JVM <strong>from the outside, without stopping it</strong>. By the end of this lesson you will find a JVM by its process number, read what each of its threads is doing, count its objects by class twice and see which class keeps growing, take a full photograph of its heap, and use all of that to catch a memory leak planted in jvm-explorer on purpose. Then we join the whole course up into one story.</p>
+    </section>
+
+    <!-- ===================== SECTION 2 — ANALOGY ===================== -->
+    <section id="s2">
+      <h2><span class="sec-num">2</span> Real-world analogy</h2>
+
+      <p>A doctor has to find out what is wrong with a patient without operating. The patient keeps living their life; the doctor uses instruments that look inside from the outside, cheapest and least intrusive first.</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>The doctor</th><th>The JVM</th></tr></thead>
+          <tbody>
+            <tr><td>Finding the right patient on the ward by bed number</td><td><strong><code>jps</code></strong> / <strong><code>jcmd</code></strong>: list running JVMs by process id</td></tr>
+            <tr><td>A stethoscope that can do many quick checks</td><td><strong><code>jcmd</code></strong>: one tool, dozens of diagnostic commands</td></tr>
+            <tr><td>A snapshot of what every organ is doing right now</td><td>A <strong>thread dump</strong> (<code>jstack</code>)</td></tr>
+            <tr><td>A blood count: how many of each kind of cell</td><td>A <strong>class histogram</strong>: instances and bytes per class</td></tr>
+            <tr><td>Two blood counts an hour apart, compared</td><td>Two histograms, compared — <strong>the class that keeps growing</strong></td></tr>
+            <tr><td>A full-body scan</td><td>A <strong>heap dump</strong>: every object and every reference</td></tr>
+            <tr><td>Tracing which artery feeds a growth</td><td>The <strong>path to GC roots</strong>: what keeps an object alive</td></tr>
+            <tr><td>The monitor beside the bed, beeping live</td><td><strong>JConsole</strong> / <strong>VisualVM</strong>: live graphs</td></tr>
+            <tr><td>A full scan exposes everything about the patient</td><td>A heap dump contains <strong>every value in memory</strong>, secrets included</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>Note the order a good doctor works in: cheap, quick, harmless checks first; the expensive full scan only when the quick checks point somewhere. The same order applies here — a histogram costs a second, a heap dump pauses the patient.</p>
+    </section>
+
+    <!-- ===================== SECTION 3 — CONCEPT ===================== -->
+    <section id="s3">
+      <h2><span class="sec-num">3</span> The concept explained</h2>
+
+      <p>We go from least to most intrusive: finding and attaching to a JVM, the thread dump, the class histogram, the heap dump and how to read one, and the visual tools. Then the course recap.</p>
+
+      <h3>3.1 Finding a JVM and attaching to it</h3>
+
+      <p>Every running program is given a number by the operating system so it can be told apart from all the others. That number is called its <strong>process id</strong>, or <strong>PID</strong>. Every JDK diagnostic tool finds a JVM by its PID. Two ways to list the JVMs running as you:</p>
+
+      <pre class="terminal"><code>jps -l          <span class="cmt"># each running JVM: PID and main class (-l = full class name)</span>
+jcmd            <span class="cmt"># the same list, from the tool you will use for everything else</span></code></pre>
+
+      <p>The JDK tools then connect to that running JVM through a local channel built into HotSpot, ask it to do something — print its threads, count its objects, write a dump — and show the answer. Connecting a tool to an already-running JVM like this is called <strong>attaching</strong>. It works only on the same machine, and only as the <strong>same operating-system user</strong> that started the JVM — a security rule, and the cause of most &ldquo;cannot attach&rdquo; errors (Section 6).</p>
+
+      <p><strong><code>jcmd</code></strong> is the one tool worth learning first: it bundles dozens of diagnostic commands behind one name. <code>jcmd &lt;pid&gt; help</code> lists everything your JVM supports. The ones this course has already pointed at:</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Command</th><th>What it does</th><th>Cost</th></tr></thead>
+          <tbody>
+            <tr><td><code>jcmd &lt;pid&gt; VM.version</code> · <code>VM.flags</code> · <code>VM.command_line</code></td><td>which JVM, which flags — Lesson 00's &ldquo;which machine?&rdquo; asked from outside</td><td>none</td></tr>
+            <tr><td><code>jcmd &lt;pid&gt; GC.heap_info</code></td><td>generation sizes right now (Lesson 04)</td><td>none</td></tr>
+            <tr><td><code>jcmd &lt;pid&gt; Thread.print</code></td><td>a thread dump — the same as <code>jstack &lt;pid&gt;</code></td><td>a very short pause</td></tr>
+            <tr><td><code>jcmd &lt;pid&gt; GC.class_histogram</code></td><td>instances and bytes per class, live objects only</td><td>a full GC first</td></tr>
+            <tr><td><code>jcmd &lt;pid&gt; GC.heap_dump &lt;file&gt;.hprof</code></td><td>a full heap dump to a file</td><td><strong>a pause</strong> and a big file</td></tr>
+            <tr><td><code>jcmd &lt;pid&gt; VM.log output=gc.log what=gc</code></td><td>switch on GC logging in a running JVM (Lesson 05)</td><td>none</td></tr>
+            <tr><td><code>jcmd &lt;pid&gt; Compiler.codecache</code></td><td>code cache usage (Lesson 06)</td><td>none</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>Command names and options are HotSpot's and occasionally change; <code>jcmd &lt;pid&gt; help &lt;command&gt;</code> is the authority on your JDK. The older single-purpose tools still exist: <code>jstack</code> for threads, and <code>jmap</code> for histograms (<code>jmap -histo:live &lt;pid&gt;</code>) and dumps (<code>jmap -dump:live,format=b,file=heap.hprof &lt;pid&gt;</code>). <code>jcmd</code> covers them both, and is the tool the JDK's own documentation recommends.</p>
+
+      <h3>3.2 The thread dump: what every thread is doing right now</h3>
+
+      <p><strong>What goes wrong without it.</strong> A service stops answering. The CPU is idle, memory is flat, the GC log is quiet, there are no errors. Nothing is <em>happening</em> — so nothing logs anything. Without a way to ask &ldquo;what is each thread waiting for?&rdquo;, the only options are guessing and restarting, and a restart fixes it for a week until it happens again.</p>
+
+      <p>A <strong>thread dump</strong> is a snapshot, for every thread in the JVM, of its name, its state, and its stack of frames — Lesson 03's frames, live, read from the top (the method running now) down to where the thread started:</p>
+
+      <pre class="terminal"><code><span class="cmt">// PREDICTED SHAPE of one thread in jstack / jcmd Thread.print output (Java 21)</span>
+"main" #1 [14820] prio=5 os_prio=0 cpu=812.50ms elapsed=95.32s tid=0x... nid=14820 waiting on condition  [0x...]
+   java.lang.Thread.State: TIMED_WAITING (sleeping)
+	at java.lang.Thread.sleep0(java.base@21.0.4/Native Method)
+	at java.lang.Thread.sleep(java.base@21.0.4/Thread.java:509)
+	at com.corejava.jvm.experiments.LeakHunt.main(LeakHunt.java:131)</code></pre>
+
+      <p>The most useful line is the <strong>state</strong>. <code>RUNNABLE</code> means running, or ready to run. <code>BLOCKED</code> means waiting to enter a <code>synchronized</code> block another thread holds. <code>WAITING</code> means waiting indefinitely for another thread to signal. <code>TIMED_WAITING</code> means waiting with a timeout, as in <code>Thread.sleep</code>. The frozen service above usually shows two or more threads <code>BLOCKED</code>, each holding a lock the other needs, so neither can ever continue. That is called a <strong>deadlock</strong>, and HotSpot detects simple Java-level ones for you: the dump ends with <code>Found one Java-level deadlock:</code> and names the threads and locks involved.</p>
+
+      <p>One dump is a single photograph and can mislead — a thread that happened to be waiting at that instant looks stuck. The standard practice is to take <strong>three dumps a few seconds apart</strong>: a thread in the same place in all three really is stuck.</p>
+
+      <h3>3.3 The class histogram — and why you need two</h3>
+
+      <p>A <strong>class histogram</strong> lists, for every class with objects on the heap, how many instances exist and how many bytes they take, largest first:</p>
+
+      <pre class="terminal"><code> num     #instances         #bytes  class name (module)
+-------------------------------------------------------
+   1:          4300       41000000  [B (java.base@21.0.4)
+   2:          4600         110400  java.lang.String (java.base@21.0.4)
+   ...
+   5:           620           9920  com.corejava.jvm.live.LeakyRegistry$LeakedSession
+Total         11520       41241920</code></pre>
+
+      <p>Two details to read correctly. The names of arrays are type descriptors from <a href="../../phase-1-foundations/chapter-01-how-java-runs/lesson-01-how-java-runs.html">Lesson 01</a>: <code>[B</code> is <code>byte[]</code>, <code>[Ljava.lang.Object;</code> is <code>Object[]</code>. And the byte counts are <strong>shallow sizes</strong>: the object itself (its header and fields), not what its fields point at. A <code>LeakedSession</code> is only a few bytes shallow — two references — while the 32 KB array it points at is counted under <code>[B</code>. That is why the leaked bytes in a histogram usually show up under <code>byte[]</code> or <code>Object[]</code>, not under the class that is actually leaking.</p>
+
+      <p><strong>What goes wrong with one histogram.</strong> <code>byte[]</code>, <code>String</code> and <code>HashMap$Node</code> sit near the top of every Java program's histogram, leak or no leak. A single histogram mostly tells you what all programs look like. The technique that works is comparing <strong>two histograms of the same process, taken a few minutes apart</strong> under similar load. Classes that stay steady are the program's normal working set. A class whose count only ever goes up, with nothing in the workload that explains it, is the suspect. That comparison is exactly what the project's new <code>HistogramDiffTool</code> does.</p>
+
+      <h3>3.4 The heap dump, and the two ideas that make it readable</h3>
+
+      <p>A histogram says <em>what</em> is piling up. It cannot say <em>why it is still alive</em>. For that you need every object and every reference between them, written to a file: a <strong>heap dump</strong> (a <code>.hprof</code> file). Three ways to get one:</p>
+
+      <ul>
+        <li><strong>On demand, from outside:</strong> <code>jcmd &lt;pid&gt; GC.heap_dump C:\dumps\service.hprof</code>. Give a full path — a relative one is resolved against the <em>target</em> JVM's working folder, not yours.</li>
+        <li><strong>Automatically, at the moment of death:</strong> start the JVM with <code>-XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=&lt;folder&gt;</code>. When an <code>OutOfMemoryError</code> happens, the dump is written before the JVM dies — the single most valuable flag for any production service (Lesson 03 recommended it).</li>
+        <li><strong>From inside the program:</strong> HotSpot's <code>HotSpotDiagnosticMXBean.dumpHeap</code> — the project's new <code>HeapDumper</code> uses it.</li>
+      </ul>
+
+      <p>A heap dump holds millions of objects, so it is read with a tool (Section 3.5). The tools rest on two ideas.</p>
+
+      <p><strong>Retained size.</strong> Shallow size undercounts badly: the <code>HashMap</code> at the heart of our leak is a few dozen bytes shallow, yet it holds the whole leak. The useful question is: <em>if this object were collected, how much memory would be freed along with it?</em> That means the object itself, plus everything that is reachable <em>only</em> through it. That amount is called the object's <strong>retained size</strong>. An object that every path to some other object must pass through is said to <strong>dominate</strong> it, and analysis tools build a <em>dominator tree</em> so the objects with the biggest retained sizes float to the top. A leak typically appears as one object with a retained size of hundreds of megabytes.</p>
+
+      <p><strong>Path to GC roots.</strong> This is <a href="../../phase-2-memory-and-gc/chapter-02-memory-and-objects/lesson-04-object-lifecycle-and-gc.html">Lesson 04</a>'s reachability rule, turned into a query: pick a suspicious object and ask the tool for the chain of references from a GC root down to it. The chain is the answer to &ldquo;why is this still alive?&rdquo;, and its first link usually names the bug.</p>
+
+      <figure class="fig">
+        <svg viewBox="0 0 720 280" role="img" aria-label="The planted leak as a heap dump shows it. A GC root, the static field SESSIONS of class LeakyRegistry, points to a HashMap, which points to its internal table, which points to many map entries, each pointing to a LeakedSession, each pointing to a 32 kilobyte byte array. The HashMap's shallow size is tiny but its retained size is the whole leak, because every path to the sessions passes through it.">
+          <defs>
+            <marker id="l7ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path class="fig-arrow-accent-h" d="M0,0 L10,5 L0,10 z"/>
+            </marker>
+          </defs>
+
+          <rect class="fig-code" x="12" y="96" width="140" height="64" rx="10"/>
+          <text class="fig-label" x="82" y="120" text-anchor="middle">GC root</text>
+          <text class="fig-small" x="82" y="138" text-anchor="middle">static field</text>
+          <text class="fig-mono" x="82" y="154" text-anchor="middle">SESSIONS</text>
+
+          <rect class="fig-accent2" x="190" y="96" width="120" height="64" rx="10"/>
+          <text class="fig-label" x="250" y="120" text-anchor="middle">HashMap</text>
+          <text class="fig-small" x="250" y="138" text-anchor="middle">shallow: ~48 B</text>
+          <text class="fig-small" x="250" y="154" text-anchor="middle">retained: ~20 MB</text>
+
+          <rect class="fig-infra" x="348" y="96" width="104" height="64" rx="10"/>
+          <text class="fig-label" x="400" y="120" text-anchor="middle">Node[]</text>
+          <text class="fig-small" x="400" y="140" text-anchor="middle">its table</text>
+
+          <rect class="fig-infra" x="490" y="30" width="96" height="40" rx="8"/>
+          <text class="fig-small" x="538" y="55" text-anchor="middle">entry</text>
+          <rect class="fig-infra" x="490" y="108" width="96" height="40" rx="8"/>
+          <text class="fig-small" x="538" y="133" text-anchor="middle">entry</text>
+          <rect class="fig-infra" x="490" y="186" width="96" height="40" rx="8"/>
+          <text class="fig-small" x="538" y="211" text-anchor="middle">… 620 entries</text>
+
+          <rect class="fig-generic" x="612" y="20" width="96" height="26" rx="6"/>
+          <text class="fig-small" x="660" y="38" text-anchor="middle">LeakedSession</text>
+          <rect class="fig-generic" x="612" y="52" width="96" height="26" rx="6"/>
+          <text class="fig-small" x="660" y="70" text-anchor="middle">byte[32 KB]</text>
+          <rect class="fig-generic" x="612" y="98" width="96" height="26" rx="6"/>
+          <text class="fig-small" x="660" y="116" text-anchor="middle">LeakedSession</text>
+          <rect class="fig-generic" x="612" y="130" width="96" height="26" rx="6"/>
+          <text class="fig-small" x="660" y="148" text-anchor="middle">byte[32 KB]</text>
+
+          <path class="fig-arrow-accent" d="M154,128 L186,128" marker-end="url(#l7ah)"/>
+          <path class="fig-arrow-accent" d="M312,128 L344,128" marker-end="url(#l7ah)"/>
+          <path class="fig-arrow-accent" d="M454,118 L486,52" marker-end="url(#l7ah)"/>
+          <path class="fig-arrow-accent" d="M454,128 L486,128" marker-end="url(#l7ah)"/>
+          <path class="fig-arrow-accent" d="M454,138 L486,204" marker-end="url(#l7ah)"/>
+          <path class="fig-arrow-accent" d="M588,46 L608,34" marker-end="url(#l7ah)"/>
+          <path class="fig-arrow-accent" d="M588,126 L608,112" marker-end="url(#l7ah)"/>
+
+          <text class="fig-small" x="360" y="252" text-anchor="middle">Path to GC roots, read right to left: byte[] ← LeakedSession ← entry ← table ← HashMap ← static field SESSIONS.</text>
+          <text class="fig-small" x="360" y="270" text-anchor="middle">The first link names the bug. Cut it (remove entries, or bound the map) and all of it becomes garbage.</text>
+        </svg>
+        <figcaption><strong>What a heap-dump tool shows for the planted leak.</strong> Amber = the GC root; indigo = the object with the huge retained size (the dominator); teal = the map's internals; grey = the leaked data. In a histogram the bytes hide under <code>byte[]</code>; in a dump, retained size points straight at the map, and the path to roots points straight at the static field.</figcaption>
+      </figure>
+
+      <div class="callout warning">
+        <p><strong>A heap dump is a copy of everything in memory</strong>: passwords, access tokens, session cookies, customers' personal data, keys. Treat it like a database backup. Store it securely, never attach it to a public bug report, delete it when the investigation ends — and never commit one (this project's <code>.gitignore</code> now ignores <code>*.hprof</code>). Taking one also pauses the JVM, for longer the bigger the live heap, and needs disk space roughly the size of the live heap.</p>
+      </div>
+
+      <h3>3.5 The visual tools</h3>
+
+      <p>Command-line tools give snapshots. For watching a JVM over time, three graphical tools are standard, and all of them attach the same way:</p>
+
+      <ul>
+        <li><strong>JConsole</strong> — ships with the JDK; run <code>jconsole</code>, pick the process. Live graphs of heap, threads, classes and CPU, read from the same MX beans the project has used since Lesson 03.</li>
+        <li><strong>VisualVM</strong> — a separate free download (no longer bundled with the JDK since Java 9). Live monitoring, thread views, sampling, and it opens <code>.hprof</code> heap dumps.</li>
+        <li><strong>Eclipse MAT</strong> (Memory Analyzer) — a free, dedicated heap-dump analyser. Its <em>Leak Suspects</em> report and dominator tree are the classic way to read a big dump.</li>
+      </ul>
+
+      <p>Beyond these sits <strong>JDK Flight Recorder</strong> (JFR): an event recorder built into HotSpot, cheap enough to leave running in production, started with <code>jcmd &lt;pid&gt; JFR.start</code> and viewed in JDK Mission Control. It deserves a course of its own; it is named here so you know where to go next. Download locations and versions of the external tools change — check each tool's own site.</p>
+
+      <h3>3.6 The whole course: the life of one object</h3>
+
+      <p>Every lesson in this course described one stage in the life of something the JVM handles. Follow a single object through all of them — an <code>Order</code> created while handling one web request: <code>Order order = new Order(id, items);</code></p>
+
+      <figure class="fig">
+        <svg viewBox="0 0 720 360" role="img" aria-label="The life of one Order object across the course. Lesson 01: javac compiles new Order into new, dup, invokespecial. Lesson 02: the Order class is loaded, linked and initialized, its description stored in Metaspace. Lesson 03: the object is allocated on the heap and a frame slot holds a reference to it. Lesson 06: if the method is hot and the object never escapes, C2 may never create it at all. Lesson 04: when the request ends the frame pops, the object becomes unreachable, and the next minor GC reclaims it without looking at it. If it is kept, it survives, ages and is promoted to the old generation, and Lesson 05's collector eventually reclaims it there. If it is kept by mistake, Lesson 07's tools find the path that holds it.">
+          <defs>
+            <marker id="l7rh" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path class="fig-arrow-h" d="M0,0 L10,5 L0,10 z"/>
+            </marker>
+            <marker id="l7ra" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path class="fig-arrow-accent-h" d="M0,0 L10,5 L0,10 z"/>
+            </marker>
+          </defs>
+
+          <!-- row 1: birth -->
+          <rect class="fig-code" x="12" y="20" width="160" height="70" rx="10"/>
+          <text class="fig-label" x="92" y="42" text-anchor="middle">L01 · compiled</text>
+          <text class="fig-small" x="92" y="60" text-anchor="middle">new / dup /</text>
+          <text class="fig-small" x="92" y="76" text-anchor="middle">invokespecial &lt;init&gt;</text>
+
+          <rect class="fig-infra" x="196" y="20" width="160" height="70" rx="10"/>
+          <text class="fig-label" x="276" y="42" text-anchor="middle">L02 · class loaded</text>
+          <text class="fig-small" x="276" y="60" text-anchor="middle">delegation, verify,</text>
+          <text class="fig-small" x="276" y="76" text-anchor="middle">&lt;clinit&gt; → Metaspace</text>
+
+          <rect class="fig-infra" x="380" y="20" width="160" height="70" rx="10"/>
+          <text class="fig-label" x="460" y="42" text-anchor="middle">L03/L04 · allocated</text>
+          <text class="fig-small" x="460" y="60" text-anchor="middle">Eden, via TLAB;</text>
+          <text class="fig-small" x="460" y="76" text-anchor="middle">frame slot = arrow</text>
+
+          <rect class="fig-accent2" x="564" y="20" width="144" height="70" rx="10"/>
+          <text class="fig-label" x="636" y="42" text-anchor="middle">L06 · or never!</text>
+          <text class="fig-small" x="636" y="60" text-anchor="middle">hot + no escape →</text>
+          <text class="fig-small" x="636" y="76" text-anchor="middle">scalar-replaced</text>
+
+          <path class="fig-arrow" d="M174,55 L192,55" marker-end="url(#l7rh)"/>
+          <path class="fig-arrow" d="M358,55 L376,55" marker-end="url(#l7rh)"/>
+          <path class="fig-arrow" d="M542,55 L560,55" marker-end="url(#l7rh)"/>
+
+          <!-- three fates -->
+          <path class="fig-arrow-accent" d="M460,92 L130,146" marker-end="url(#l7ra)"/>
+          <path class="fig-arrow-accent" d="M460,92 L360,146" marker-end="url(#l7ra)"/>
+          <path class="fig-arrow-accent" d="M460,92 L590,146" marker-end="url(#l7ra)"/>
+
+          <rect class="fig-box" x="12" y="150" width="236" height="96" rx="12"/>
+          <text class="fig-label" x="130" y="174" text-anchor="middle">fate 1 · dies young (most)</text>
+          <text class="fig-small" x="130" y="194" text-anchor="middle">request ends → frame popped →</text>
+          <text class="fig-small" x="130" y="210" text-anchor="middle">unreachable (L04). Next minor GC:</text>
+          <text class="fig-small" x="130" y="226" text-anchor="middle">Pause Young, never even looked at (L05)</text>
+
+          <rect class="fig-box" x="262" y="150" width="200" height="96" rx="12"/>
+          <text class="fig-label" x="362" y="174" text-anchor="middle">fate 2 · kept on purpose</text>
+          <text class="fig-small" x="362" y="194" text-anchor="middle">survives, ages in survivor,</text>
+          <text class="fig-small" x="362" y="210" text-anchor="middle">promoted to old (L04);</text>
+          <text class="fig-small" x="362" y="226" text-anchor="middle">later a mixed / full GC (L05)</text>
+
+          <rect class="fig-box" x="476" y="150" width="232" height="96" rx="12"/>
+          <text class="fig-label" x="592" y="174" text-anchor="middle">fate 3 · kept by mistake</text>
+          <text class="fig-small" x="592" y="194" text-anchor="middle">a static map holds it: a leak (L04);</text>
+          <text class="fig-small" x="592" y="210" text-anchor="middle">old gen climbs (L05) → histograms,</text>
+          <text class="fig-small" x="592" y="226" text-anchor="middle">heap dump, path to roots (L07)</text>
+
+          <text class="fig-small" x="360" y="276" text-anchor="middle">Under all of it: Lesson 00's pinned Java 21 — so every observation was made on the engine the lessons describe —</text>
+          <text class="fig-small" x="360" y="294" text-anchor="middle">and the JIT (L01, L06) quietly turning the hot code into machine code while the program runs.</text>
+          <text class="fig-small" x="360" y="324" text-anchor="middle">One object; every lesson is one stage of its life.</text>
+        </svg>
+        <figcaption><strong>The course in one picture.</strong> Amber = your source; teal = the JVM's machinery; indigo = the optimisation that can skip a stage; plain boxes = the three ways an object's life ends. Each label names the lesson that explains that stage.</figcaption>
+      </figure>
+
+      <p>In words, the same journey. <code>javac</code> turns <code>new Order(...)</code> into three bytecode instructions — <code>new</code>, <code>dup</code>, <code>invokespecial &lt;init&gt;</code> — in a class file stamped with version 65 (<a href="../../phase-1-foundations/chapter-01-how-java-runs/lesson-01-how-java-runs.html">Lesson 01</a>). The first time that code runs, the application class loader finds <code>Order.class</code> after asking its parents first, verifies and prepares it, and runs its <code>&lt;clinit&gt;</code> exactly once (<a href="../../phase-1-foundations/chapter-01-how-java-runs/lesson-02-class-loading.html">Lesson 02</a>); its description now lives in Metaspace (<a href="../../phase-2-memory-and-gc/chapter-02-memory-and-objects/lesson-03-runtime-memory-areas.html">Lesson 03</a>). <code>new</code> bumps a pointer in this thread's slice of Eden, and a slot in the method's frame receives an arrow to the object, not the object (<a href="../../phase-2-memory-and-gc/chapter-02-memory-and-objects/lesson-03-runtime-memory-areas.html">Lesson 03</a>, <a href="../../phase-2-memory-and-gc/chapter-02-memory-and-objects/lesson-04-object-lifecycle-and-gc.html">Lesson 04</a>). If this code is hot and the order never escapes the method, C2 may skip creating it at all (<a href="../../phase-2-memory-and-gc/chapter-03-gc-and-jit/lesson-06-the-jit-compiler.html">Lesson 06</a>).</p>
+
+      <p>Then one of three endings. Most likely, the request finishes, the frame is popped, nothing reaches the order any more, and the next minor GC — a short <code>Pause Young</code> in the log — reclaims it without ever looking at it (Lessons 04 and 05). If the program keeps it on purpose — in a session, a cache — it survives collection after collection, ages, gets promoted to the old generation, and is eventually reclaimed there by a mixed or full collection once it is finally let go (Lessons 04 and 05). And if the program keeps it <em>by mistake</em>, in a static map that never forgets, it is a leak: the old generation climbs, the live data after full GCs rises, and the tools of this lesson find the class that grows and the path that holds it.</p>
+    </section>
+
+    <!-- ===================== SECTION 4 — APPLIED ===================== -->
+    <section id="s4">
+      <h2><span class="sec-num">4</span> Applied to jvm-explorer</h2>
+
+      <p>The project gains a <code>live</code> package: a deliberately planted leak and its fix, a class-histogram parser and comparison tool, and an in-process heap dumper. The <code>LeakHunt</code> experiment keeps running long enough for you to aim real JDK tools at it.</p>
+
+      <h3>4.1 What happens, step by step</h3>
+
+      <ol>
+        <li>You start <code>LeakHunt</code>. It prints its own PID (<code>ProcessHandle.current().pid()</code>) and the exact <code>jcmd</code> commands to run against it, then handles ten fake requests per second.</li>
+        <li>Each request calls <code>LeakyRegistry.handleRequest</code>, which puts a new <code>LeakedSession</code> (holding a 32 KB array) into a <strong>static</strong> <code>HashMap</code> and never removes anything. About 320 KB a second becomes permanently reachable. Every two seconds a status line shows the session count and the heap's <code>used</code> figure climbing.</li>
+        <li>In a second terminal, <code>jcmd &lt;pid&gt; GC.class_histogram &gt; histo-before.log</code> attaches, runs a full GC so only live objects are counted, and writes the histogram. A minute later, the same command writes <code>histo-after.log</code>.</li>
+        <li><code>HistogramDiffTool</code> reads both files — UTF-16 or not, using Lesson 06's reader — parses every row, matches classes by name, and lists those whose bytes grew, largest first. <code>byte[]</code> tops the list, holding the payloads, with <code>LeakyRegistry$LeakedSession</code> growing by exactly ten instances per second: the suspect.</li>
+        <li><code>jcmd &lt;pid&gt; Thread.print</code> shows the <code>main</code> thread <code>TIMED_WAITING</code> in <code>Thread.sleep</code>, called from <code>LeakHunt.main</code>: the service is idle between requests, not stuck.</li>
+        <li>You press Enter. With <code>--dump</code>, <code>HeapDumper</code> asks HotSpot's diagnostic bean to write a live-objects heap dump to <code>leak-&lt;pid&gt;.hprof</code>. Opened in VisualVM or Eclipse MAT, the <code>HashMap</code> held by <code>LeakyRegistry.SESSIONS</code> has by far the largest retained size, and its path to GC roots ends at that static field.</li>
+        <li>Run again with <code>--fixed</code>: <code>FixedRegistry</code> evicts its oldest session once it holds 20. Evicted sessions become unreachable and are collected, the heap stays flat, and the two histograms show nothing growing.</li>
+      </ol>
+
+      <h3>4.2 The files</h3>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>File</th><th>Its one job</th></tr></thead>
+          <tbody>
+            <tr><td><code>live/LeakyRegistry.java</code></td><td>the planted leak: a static map that only grows</td></tr>
+            <tr><td><code>live/FixedRegistry.java</code></td><td>the fix: the same registry, bounded, evicting the oldest</td></tr>
+            <tr><td><code>live/HistogramRow.java</code></td><td>a record: one row of a class histogram</td></tr>
+            <tr><td><code>live/ClassGrowth.java</code></td><td>a record: how one class changed between two histograms</td></tr>
+            <tr><td><code>live/ClassHistogram.java</code></td><td>parses histograms, compares two, reads array names as Java</td></tr>
+            <tr><td><code>live/HistogramDiffTool.java</code></td><td>two histogram files in, the growing classes out</td></tr>
+            <tr><td><code>live/HeapDumper.java</code></td><td>writes a heap dump of this JVM to a <code>.hprof</code> file</td></tr>
+            <tr><td><code>experiments/LeakHunt.java</code></td><td>a long-running &ldquo;service&rdquo; to attach tools to; <code>--fixed</code>, <code>--dump</code>, <code>--seconds=N</code></td></tr>
+            <tr><td><code>JvmExplorer.java</code>, <code>.gitignore</code> (modified)</td><td>prints its PID and the leak in miniature; never commit <code>*.hprof</code></td></tr>
+            <tr><td>four test classes (+ shared samples)</td><td>15 new tests, taking the project to <strong>120</strong></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>4.3 The leak and its fix, side by side</h3>
+
+      <pre class="code"><code><span class="cmt">// THE LEAK - a static field (a GC root) holding a map that only grows.</span>
+<span class="kw">private static final</span> <span class="ty">Map</span>&lt;<span class="ty">String</span>, <span class="ty">LeakedSession</span>&gt; SESSIONS = <span class="kw">new</span> <span class="ty">HashMap</span>&lt;&gt;();
+
+<span class="kw">public static synchronized int</span> <span class="fn">handleRequest</span>(<span class="kw">int</span> requestNumber) {
+    <span class="ty">String</span> id = <span class="str">"session-"</span> + requestNumber;
+    SESSIONS.<span class="fn">put</span>(id, <span class="kw">new</span> <span class="ty">LeakedSession</span>(id, <span class="kw">new byte</span>[PAYLOAD_BYTES]));   <span class="cmt">// never removed</span>
+    <span class="kw">return</span> SESSIONS.<span class="fn">size</span>();
+}
+
+<span class="cmt">// THE FIX - the same map, bounded: after every put, drop the eldest past CAPACITY.</span>
+<span class="kw">private static final</span> <span class="ty">Map</span>&lt;<span class="ty">String</span>, <span class="kw">byte</span>[]&gt; SESSIONS = <span class="kw">new</span> <span class="ty">LinkedHashMap</span>&lt;&gt;() {
+    <span class="anno">@Override</span>
+    <span class="kw">protected boolean</span> <span class="fn">removeEldestEntry</span>(<span class="ty">Map</span>.<span class="ty">Entry</span>&lt;<span class="ty">String</span>, <span class="kw">byte</span>[]&gt; eldest) {
+        <span class="kw">return</span> <span class="fn">size</span>() &gt; CAPACITY;   <span class="cmt">// the eldest loses its only reference: garbage</span>
+    }
+};</code></pre>
+
+      <p>The bug is one line, and it looks innocent. The fix is one method. A real cache should usually come from a caching library with size and time limits, but the principle is exactly this: every collection that lives as long as the program needs a rule that removes things from it.</p>
+
+      <h3>4.4 Comparing histograms</h3>
+
+      <pre class="code"><code><span class="kw">for</span> (<span class="ty">HistogramRow</span> row : after) {
+    <span class="ty">HistogramRow</span> old = earlier.<span class="fn">get</span>(row.<span class="fn">className</span>());
+    <span class="cmt">// A class absent from the first histogram had zero instances then.</span>
+    <span class="ty">ClassGrowth</span> g = <span class="kw">new</span> <span class="ty">ClassGrowth</span>(row.<span class="fn">className</span>(),
+            old == <span class="kw">null</span> ? <span class="num">0</span> : old.<span class="fn">instances</span>(), row.<span class="fn">instances</span>(),
+            old == <span class="kw">null</span> ? <span class="num">0</span> : old.<span class="fn">bytes</span>(), row.<span class="fn">bytes</span>());
+    <span class="kw">if</span> (g.<span class="fn">byteGrowth</span>() &gt; <span class="num">0</span>) {
+        grew.<span class="fn">add</span>(g);
+    }
+}
+<span class="cmt">// Largest growth first: the top of this list is where to look.</span>
+grew.<span class="fn">sort</span>(<span class="ty">Comparator</span>.<span class="fn">comparingLong</span>(<span class="ty">ClassGrowth</span>::byteGrowth).<span class="fn">reversed</span>());</code></pre>
+
+      <p>And the array names, read with Lesson 01's descriptors: one <code>[</code> per dimension, then a letter for a primitive or <code>L…;</code> for a class. So <code>[B</code> prints as <code>byte[]</code> and <code>[[Ljava.lang.String;</code> as <code>java.lang.String[][]</code>.</p>
+
+      <h3>4.5 The tests</h3>
+
+      <p>The registries are tested exactly: every request is kept by the leaky one, and the bounded one never exceeds its capacity and always evicts the oldest. Because both are static, every test empties them afterwards. The histogram tests use two hand-worked samples with every expected difference written in a comment. <code>LiveToolsTest</code> takes one <strong>real heap dump</strong> of the test JVM into JUnit's temporary folder, which is deleted afterwards. The long-running <code>LeakHunt</code> service itself is never run by a test; only its argument handling is.</p>
+
+      <pre class="code"><code><span class="anno">@Test</span>
+<span class="kw">void</span> <span class="fn">theFixedRegistryEvictsTheOldestFirst</span>() {
+    <span class="kw">int</span> total = FixedRegistry.CAPACITY + <span class="num">5</span>;
+    <span class="kw">for</span> (<span class="kw">int</span> request = <span class="num">1</span>; request &lt;= total; request++) {
+        FixedRegistry.<span class="fn">handleRequest</span>(request);
+    }
+    <span class="fn">assertFalse</span>(FixedRegistry.<span class="fn">holds</span>(<span class="num">1</span>), <span class="str">"The very first session was evicted - and is now collectable."</span>);
+    <span class="fn">assertTrue</span>(FixedRegistry.<span class="fn">holds</span>(total), <span class="str">"The newest session is always held."</span>);
+}</code></pre>
+
+      <h3>4.6 Predicted output and the commands to check it</h3>
+
+      <pre class="terminal"><code><span class="cmt"># from inside jvm-explorer/</span>
+mvn test</code></pre>
+
+      <pre class="terminal"><code><span class="cmt">// PREDICTED (trimmed)</span>
+[INFO] Running com.corejava.jvm.live.ClassHistogramTest
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0
+[INFO] Running com.corejava.jvm.live.LiveToolsTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0
+[INFO] Running com.corejava.jvm.live.RegistryTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0
+[INFO] Running com.corejava.jvm.experiments.LeakHuntTest
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0
+<span class="cmt">... and the twenty-five test classes from Lessons 00-06, unchanged ...</span>
+[INFO] <span class="out">Tests run: 120, Failures: 0, Errors: 0, Skipped: 0</span>
+[INFO] BUILD SUCCESS</code></pre>
+
+      <div class="callout tryit">
+        <p>Run <code>mvn test</code> from <code>jvm-explorer/</code> and check for <strong>120 tests, all green</strong>. If it does not match, the machine is right — tell me what you saw.</p>
+      </div>
+
+      <p>Now the hunt. You need <strong>two terminals</strong>, both in <code>jvm-explorer/</code>. In the first:</p>
+
+      <pre class="terminal"><code>mvn compile
+java -Xmx256m -cp target/classes com.corejava.jvm.experiments.LeakHunt</code></pre>
+
+      <pre class="terminal"><code><span class="cmt">// PREDICTED — the PID and figures will differ</span>
+=== leak hunt: a long-running service with a planted leak ===
+process id (PID)  : 14820
+registry          : LEAKY (never removes)
+examine it from ANOTHER terminal, e.g.:
+  jcmd 14820 GC.class_histogram &gt; histo-before.log
+  jcmd 14820 Thread.print
+press Enter here to stop (or wait 600 s)
+
+requests     20 | sessions held     20 | heap used     4 MB of 256 MB
+requests     40 | sessions held     40 | heap used     5 MB of 256 MB
+<span class="out">requests    600 | sessions held    600 | heap used    24 MB of 256 MB</span></code></pre>
+
+      <p>In the second terminal, using the PID it printed:</p>
+
+      <pre class="terminal"><code>jps -l
+jcmd 14820 GC.class_histogram &gt; histo-before.log
+<span class="cmt"># ...wait about a minute...</span>
+jcmd 14820 GC.class_histogram &gt; histo-after.log
+java -cp target/classes com.corejava.jvm.live.HistogramDiffTool histo-before.log histo-after.log
+jcmd 14820 Thread.print</code></pre>
+
+      <pre class="terminal"><code><span class="cmt">// PREDICTED SHAPE of the comparison (one minute apart)</span>
+classes that grew between histo-before.log and histo-after.log (612 and 615 classes):
+<span class="out">      +600 instances       +19670400 bytes  byte[]</span>
+      +600 instances          +19200 bytes  java.util.HashMap$Node
+<span class="out">      +600 instances           +9600 bytes  com.corejava.jvm.live.LeakyRegistry$LeakedSession</span>
+      +601 instances          +14424 bytes  java.lang.String
+       ...</code></pre>
+
+      <p>Read it like an investigator. <code>byte[]</code> grew the most, but every program has byte arrays; on its own that proves nothing. What stands out is that <strong>one of your own classes</strong>, <code>LeakedSession</code>, grew by <em>exactly</em> the number of requests handled in that minute, with <code>HashMap$Node</code> growing in step, and with the byte growth matching 600 × 32 KB (plus a 16-byte header per array: 600 × 32,784 = 19,670,400). That points at a map that gains one entry per request and never loses any. The histograms cannot name the map. Only a heap dump can:</p>
+
+      <pre class="terminal"><code><span class="cmt"># press Enter in the first terminal, then run it again with a dump at the end:</span>
+java -Xmx256m -cp target/classes com.corejava.jvm.experiments.LeakHunt --seconds=60 --dump</code></pre>
+
+      <p>Open the <code>leak-&lt;pid&gt;.hprof</code> it writes in VisualVM (File → Load) or Eclipse MAT, find <code>LeakedSession</code>, and ask for its path to GC roots. Predicted: the chain ends at the static field <code>SESSIONS</code> of <code>LeakyRegistry</code>, as in the diagram in Section 3.4. Exact menu names differ between tools and versions.</p>
+
+      <p>Finally, the cure and the crash:</p>
+
+      <pre class="terminal"><code><span class="cmt"># the fix: the heap stays flat and two histograms show nothing growing</span>
+java -Xmx256m -cp target/classes com.corejava.jvm.experiments.LeakHunt --fixed
+
+<span class="cmt"># the leak, run to its end: a small heap, a dump written automatically at the moment of death</span>
+java -Xmx64m -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=oom.hprof -cp target/classes com.corejava.jvm.experiments.LeakHunt</code></pre>
+
+      <p>With <code>-Xmx64m</code>, predicted: after roughly two to three minutes the leak fills the heap, the JVM writes <code>oom.hprof</code>, and the program dies with <code>OutOfMemoryError: Java heap space</code>. That is Lesson 03's error, now with its evidence saved. Opening that dump shows the same culprit.</p>
+
+      <div class="callout tryit">
+        <p>Run the hunt and compare with the predicted shapes. Then open JConsole (<code>jconsole</code>) against a running <code>LeakHunt</code>, watch the heap graph climb, and compare it with a <code>--fixed</code> run. <strong>Project state: compiles, 120 tests green</strong> (predicted). The <code>*.log</code> and <code>*.hprof</code> files are git-ignored. Every number is your machine's; where the shape differs, the machine wins — tell me what you saw.</p>
+      </div>
+    </section>
+
+    <!-- ===================== SECTION 5 — IN THE WILD ===================== -->
+    <section id="s5">
+      <h2><span class="sec-num">5</span> In the wild</h2>
+
+      <p>The flag pair <code>-XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=...</code> is on the standard checklist for running Java in production. A service that dies of a leak at 3 a.m. leaves behind the exact state that killed it, instead of a single line in a log. In container platforms the dump path must point at storage that survives the container's restart, or the evidence vanishes with it. Teams that have been burned once add a volume for exactly that.</p>
+
+      <div class="callout realworld">
+        <p>A realistic leak investigation follows this lesson's order. First, the GC log or a dashboard shows the old generation's floor rising (Lesson 05). Next come two class histograms ten minutes apart, which name a suspect class in seconds and pause nothing but a quick GC. Only then is one heap dump taken, during a quiet period because it pauses the service, then copied somewhere safe and opened in MAT. The path to GC roots names the field, the field names the code, and the fix is a removal rule. In an interview, describing that sequence — cheapest evidence first, the dump last, and the dump treated as sensitive data — is what distinguishes someone who has done it from someone who has read about it.</p>
+      </div>
+    </section>
+
+    <!-- ===================== SECTION 6 — GOTCHAS ===================== -->
+    <section id="s6">
+      <h2><span class="sec-num">6</span> Gotchas and common mistakes</h2>
+      <ul>
+        <li><strong>Treating a heap dump as harmless.</strong> It contains every value in memory: passwords, tokens, customer data. People attach them to tickets and leave them in shared folders. <em>Avoid it:</em> handle dumps like a production database backup — restricted storage, deleted when done, never in version control.</li>
+        <li><strong>Taking a heap dump of a busy production JVM without thinking.</strong> It pauses the JVM, for seconds on a large heap, and needs disk space roughly equal to the live heap, so it can fill the disk and take the service down itself. <em>Avoid it:</em> start with histograms; take the dump when traffic is low, or from an instance already removed from the load balancer.</li>
+        <li><strong>&ldquo;Unable to attach&rdquo; / &ldquo;AttachNotSupportedException&rdquo;.</strong> Attaching requires the same operating-system user as the target JVM, on the same machine (inside a container, the same container). <em>Avoid it:</em> run <code>jcmd</code> as the user that started the JVM, and inside the container (<code>docker exec</code>, <code>kubectl exec</code>); check that the JVM was not started with attaching disabled.</li>
+        <li><strong>Hunting a leak with a single histogram.</strong> The top of every histogram is <code>byte[]</code>, <code>String</code> and friends, leak or no leak. <em>Avoid it:</em> always compare two, minutes apart under similar load, and look for <em>your</em> classes growing in step with requests.</li>
+        <li><strong>Forgetting that <code>GC.class_histogram</code> and live heap dumps run a full GC.</strong> On a service with a large heap that is a noticeable pause in its own right, and it changes the very thing you are measuring. <em>Avoid it:</em> know the cost before you press Enter. The live-only view is still usually what you want, because it hides garbage that is about to vanish anyway.</li>
+      </ul>
+    </section>
+
+    <!-- ===================== SECTION 7 — TAKEAWAYS ===================== -->
+    <section id="s7">
+      <h2><span class="sec-num">7</span> Key takeaways</h2>
+      <ul>
+        <li>JDK tools attach to a running JVM by its process id, as the same user on the same machine, and <code>jcmd</code> bundles almost everything — version and flags, thread dumps, class histograms, heap dumps, logging — behind one command.</li>
+        <li>A thread dump shows every thread's name, state and stack; several threads <code>BLOCKED</code> on each other is a deadlock, which HotSpot reports for you, and three dumps a few seconds apart separate a stuck thread from a busy one.</li>
+        <li>One class histogram shows what every program looks like; two histograms taken minutes apart show the class that keeps growing, which is the leak suspect.</li>
+        <li>A heap dump captures every object and reference; retained size points at the object holding the leak, the path to GC roots shows exactly which field keeps it alive, and the dump itself is sensitive data that pauses the JVM to take.</li>
+        <li>Every lesson in this course is one stage in an object's life — compiled, its class loaded, allocated in Eden or optimised away, then dying young, being promoted and collected, or leaking — and the tools in this lesson let you see each stage in a real, running JVM.</li>
+      </ul>
+    </section>
+
+    <!-- ===================== SECTION 8 — CHALLENGE ===================== -->
+    <section id="s8">
+      <h2><span class="sec-num">8</span> Challenge</h2>
+
+      <p><strong>Part A — find the suspect.</strong> Two histograms of a web service, taken ten minutes apart under steady traffic, compare like this:</p>
+
+      <pre class="terminal"><code>    +48210 instances      +98304000 bytes  byte[]
+    +48200 instances       +1542400 bytes  java.util.concurrent.ConcurrentHashMap$Node
+    +48200 instances       +1156800 bytes  com.acme.web.UserContext
+     +3120 instances         +74880 bytes  java.lang.String
+       +12 instances           +384 bytes  com.acme.orders.Order</code></pre>
+
+      <p>(1) Which line is the strongest leak suspect, and why not the top line? (2) What kind of structure probably holds it? (3) What would you look for in a heap dump to confirm it?</p>
+
+      <p><strong>Part B — read a thread dump.</strong> A service is frozen with the CPU idle. Its thread dump contains:</p>
+
+      <pre class="terminal"><code>"worker-1" #31 ... waiting for monitor entry
+   java.lang.Thread.State: BLOCKED (on object monitor)
+	at com.acme.Ledger.transfer(Ledger.java:40)
+	- waiting to lock &lt;0x...a1&gt; (a com.acme.Account)
+	- locked &lt;0x...b2&gt; (a com.acme.Account)
+
+"worker-2" #32 ... waiting for monitor entry
+   java.lang.Thread.State: BLOCKED (on object monitor)
+	at com.acme.Ledger.transfer(Ledger.java:40)
+	- waiting to lock &lt;0x...b2&gt; (a com.acme.Account)
+	- locked &lt;0x...a1&gt; (a com.acme.Account)
+
+Found one Java-level deadlock:</code></pre>
+
+      <p>Explain what happened, and name the standard fix.</p>
+
+      <p><strong>Part C — check yourself on the machine.</strong> Run <code>LeakHunt</code> with <code>-Xmx64m -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=oom.hprof</code>. Before you start, predict roughly when it will die, from 320 KB per second and a 64 MB heap. Then compare your prediction with what happens.</p>
+
+      <details class="answer">
+        <summary>Click to reveal the answer</summary>
+
+        <p><strong>Part A (1).</strong> <code>com.acme.web.UserContext</code>. <code>byte[]</code> grows the most in bytes, but almost every Java program allocates byte arrays, so on its own it proves nothing — and its shallow bytes are probably the payloads <em>held by</em> something else. <code>UserContext</code> is one of the application's own classes, growing by about 48,000 in ten minutes under steady traffic, in step with a map node count. A per-request context object should die with its request (Lesson 04's fate 1); this one is being kept. <code>Order</code>, by contrast, barely moves: normal working set.</p>
+
+        <p><strong>Part A (2).</strong> A <code>ConcurrentHashMap</code> gaining one entry per request — the node count grows in exact step with <code>UserContext</code>. Most likely a static map of contexts keyed by request or session id, with no removal — this lesson's <code>LeakyRegistry</code> with a different name. The <code>byte[]</code> growth is plausibly data each context holds (about 2 KB each).</p>
+
+        <p><strong>Part A (3).</strong> In the dump: find <code>UserContext</code> instances, ask for the path to GC roots of one, and expect a chain ending at a static field holding a <code>ConcurrentHashMap</code>. The dominator tree should show that map with a retained size of about 100 MB. The field's name and class point at the code; the fix is a removal rule — remove the context when the request ends, or use a bounded, expiring cache.</p>
+
+        <p><strong>Part B.</strong> A <strong>deadlock</strong>. <code>worker-1</code> is transferring between two accounts: it holds account <code>b2</code>'s lock and wants <code>a1</code>'s. <code>worker-2</code> is transferring in the opposite direction: it holds <code>a1</code> and wants <code>b2</code>. Each waits for the other forever, so the CPU is idle and nothing progresses. The standard fix is a <strong>consistent lock order</strong>: always lock the two accounts in the same order (for example by account id, lowest first), whatever the direction of the transfer, so two threads can never each hold one lock of the pair. (Higher-level concurrency utilities with timeouts are the other common answer — a later course in this series.)</p>
+
+        <p><strong>Part C.</strong> 64 MB ÷ 0.32 MB per second ≈ 200 seconds, but the heap is never fully available to the leak: the JVM's own objects, the young generation's working space, and the collector's need for headroom all take a share. A prediction of <strong>roughly two to three minutes</strong> is reasonable. You should then see <code>java.lang.OutOfMemoryError: Java heap space</code>, a line saying a heap dump was written to <code>oom.hprof</code>, and the JVM exit — and opening that file shows <code>LeakyRegistry.SESSIONS</code> holding nearly the whole heap. If your timing is very different, look at the last status lines before the crash; the machine wins — tell me what you saw.</p>
+      </details>
+    </section>
+
+    <!-- ===================== SECTION 9 — ALMANAC ===================== -->
+    <section id="s9">
+      <h2><span class="sec-num">9</span> Almanac update</h2>
+      <p>Added to <code>almanac.md</code>: finding and attaching to a JVM (PID, <code>jps</code>, <code>jcmd</code>, the same-user rule); the <code>jcmd</code> command table with costs; thread states, deadlocks and the three-dumps rule; class histograms, shallow size, descriptor names and the two-histogram technique; heap dumps — three ways to take one, retained size, dominators, path to GC roots, and their cost and sensitivity; the visual tools; the investigation order (cheapest evidence first); and, to finish, <strong>the whole course on one page</strong> — the life of one object, stage by stage, lesson by lesson.</p>
+    </section>
+
+    <!-- ===================== SECTION 10 — WHAT IS NEXT ===================== -->
+    <section id="s10">
+      <div class="nextup">
+        <p class="kicker">What is next</p>
+        <h2>Course 01 complete</h2>
+        <p>That is the whole base layer: how Java becomes bytecode, how classes load, where objects live, how garbage is found and collected, how the JIT makes code fast, and how to see all of it in a running JVM. Every later course in the Core Java In-Depth series stands on this one. Reread <code>almanac.md</code> before interviews and real work, and keep jvm-explorer around — it is a working laboratory for every question this course raised.</p>
+      </div>
+    </section>
+
+    <p class="position">Lesson 07 of 07 — the final lesson of Core Java Course 01: JVM Internals &amp; Memory Management</p>
+
+  </main>
+</div>
+</body>
+</html>
