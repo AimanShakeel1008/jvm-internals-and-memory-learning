@@ -38,7 +38,7 @@
     <header class="banner">
       <p class="kicker">Core Java In-Depth · Course 01 of 19</p>
       <h1>JVM Internals &amp; Memory Management</h1>
-      <p class="subtitle">What actually happens when Java runs: source to bytecode, class loading, the heap, garbage collection, and the JIT — the base layer every later course stands on.</p>
+      <p class="subtitle">What really happens when Java runs: source to bytecode, class loading, the heap, garbage collection, and the JIT. Every later course stands on this one.</p>
       <p class="meta"><strong>Project:</strong> <code>jvm-explorer</code> — a program that provokes and observes the JVM itself. &nbsp;·&nbsp; <strong>8 lessons</strong> (00–07), plain Java 21, no frameworks.</p>
     </header>
 
@@ -75,7 +75,7 @@
           <text class="fig-vs-t" x="640" y="57" text-anchor="middle">▾</text>
           <text class="fig-small" x="640" y="30" text-anchor="middle">course complete</text>
         </svg>
-        <figcaption><strong>Three stages, all done.</strong> Teal = phases behind you; amber = the final phase. Every lesson is now available to revisit, and <code>almanac.md</code> ends with the whole course on one page.</figcaption>
+        <figcaption><strong>Three stages, all done.</strong> Teal = phases behind you. Amber = the final phase. You can go back to any lesson. <code>almanac.md</code> ends with the whole course on one page.</figcaption>
       </figure>
     </section>
 
@@ -87,7 +87,7 @@
         <a class="hub-card" href="phase-1-foundations/chapter-00-setup/lesson-00-full-setup.html">
           <span class="status-badge done">Done</span>
           <h3>Lesson 00 — Full Setup</h3>
-          <p>Pin every version, write it into committed files, and make the machine prove its identity. Builds <code>jvm-explorer</code> and its first three tests.</p>
+          <p>Pin every version in committed files, and make the machine prove what it is. Builds <code>jvm-explorer</code> and its first three tests.</p>
         </a>
         <a class="hub-card" href="phase-1-foundations/chapter-01-how-java-runs/lesson-01-how-java-runs.html">
           <span class="status-badge done">Done</span>
@@ -97,7 +97,7 @@
         <a class="hub-card" href="phase-1-foundations/chapter-01-how-java-runs/lesson-02-class-loading.html">
           <span class="status-badge done">Done</span>
           <h3>Lesson 02 — Class Loading</h3>
-          <p>The three loaders and parent delegation, the five lifecycle steps, and exactly which lines of code wake a class up — proved with a witness log.</p>
+          <p>The three loaders and parent delegation. The five lifecycle steps. Exactly which lines of code make a class initialize, proved with a log.</p>
         </a>
       </div>
     </section>
@@ -110,22 +110,22 @@
         <a class="hub-card" href="phase-2-memory-and-gc/chapter-02-memory-and-objects/lesson-03-runtime-memory-areas.html">
           <span class="status-badge done">Done</span>
           <h3>Lesson 03 — Runtime Memory Areas</h3>
-          <p>Stack frames vs the shared heap, why a variable is an arrow, Metaspace after PermGen — then both walls provoked on purpose.</p>
+          <p>Stack frames vs the shared heap. Why a variable is an arrow. Metaspace after PermGen. Then both memory walls hit on purpose.</p>
         </a>
         <a class="hub-card" href="phase-2-memory-and-gc/chapter-02-memory-and-objects/lesson-04-object-lifecycle-and-gc.html">
           <span class="status-badge done">Done</span>
           <h3>Lesson 04 — Object Lifecycle &amp; GC Fundamentals</h3>
-          <p>Reachability from the GC roots (and why cycles don't matter), how Java still leaks, and real objects ageing through survivor spaces into the old generation.</p>
+          <p>Reachability from the GC roots, and why cycles don't matter. How Java can still leak. Real objects ageing through survivor spaces into the old generation.</p>
         </a>
         <a class="hub-card" href="phase-2-memory-and-gc/chapter-03-gc-and-jit/lesson-05-gc-algorithms-and-logs.html">
           <span class="status-badge done">Done</span>
           <h3>Lesson 05 — GC Algorithms &amp; Reading GC Logs</h3>
-          <p>Serial, Parallel, G1 and ZGC as four bets on throughput versus pause time; a GC log line read field by field; jvm-explorer summarises its own log.</p>
+          <p>Serial, Parallel, G1 and ZGC: four choices between throughput and short pauses. A GC log line read piece by piece. jvm-explorer sums up its own log.</p>
         </a>
         <a class="hub-card" href="phase-2-memory-and-gc/chapter-03-gc-and-jit/lesson-06-the-jit-compiler.html">
           <span class="status-badge done">Done</span>
           <h3>Lesson 06 — The JIT Compiler</h3>
-          <p>Tiers 0 → 3 → 4, on-stack replacement, inlining, escape analysis measured (24 bytes per call → 0), and deoptimization caught in the JVM's own log.</p>
+          <p>Tiers 0 → 3 → 4, on-stack replacement, and inlining. Escape analysis measured (24 bytes per call → 0). Deoptimization caught in the JVM's own log.</p>
         </a>
       </div>
     </section>
@@ -138,7 +138,7 @@
         <a class="hub-card" href="phase-3-observing/chapter-04-live-jvm-tools/lesson-07-seeing-inside-a-live-jvm.html">
           <span class="status-badge done">Done</span>
           <h3>Lesson 07 — Seeing Inside a Live JVM</h3>
-          <p><code>jcmd</code>, <code>jstack</code>, <code>jmap</code>, VisualVM; two histograms and a heap dump catch a planted leak. Then the whole course as the life of one object.</p>
+          <p><code>jcmd</code>, <code>jstack</code>, <code>jmap</code> and VisualVM. Two histograms and a heap dump catch a planted leak. Then the whole course, as the life of one object.</p>
         </a>
       </div>
     </section>
@@ -151,7 +151,7 @@
         <a class="hub-card" href="cheatsheet-and-interview-prep.html">
           <span class="status-badge done">Ready</span>
           <h3>Cheatsheet &amp; Interview Prep</h3>
-          <p>Every lesson in tables, all flags and commands, numbers to know, myths to retire, 50 interview questions and 5 puzzles with hidden answers, and production scenarios.</p>
+          <p>Every lesson in tables. All flags and commands, numbers to know, and myths to drop. 50 interview questions and 5 puzzles with hidden answers. Real production scenarios.</p>
         </a>
       </div>
     </section>

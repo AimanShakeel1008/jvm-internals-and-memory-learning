@@ -44,7 +44,7 @@
     <header class="banner">
       <p class="kicker">Core Java · Course 01 · JVM Internals &amp; Memory</p>
       <h1>Cheatsheet &amp; Interview Prep</h1>
-      <p class="subtitle">Everything from the eight lessons, compressed for revision: tables to skim, flags and numbers to remember, myths to retire, fifty interview questions and five predict-the-output puzzles, each with a hidden answer to test yourself against.</p>
+      <p class="subtitle">Everything from the eight lessons, squeezed down for revision. Tables to skim, flags and numbers to remember, and myths to drop. Fifty interview questions and five predict-the-output puzzles, each with a hidden answer to test yourself against.</p>
       <p class="meta">
         <strong>Covers:</strong> Lessons 00–07 &nbsp;·&nbsp;
         <strong>Use with:</strong> <code>almanac.md</code> (the long-form rules) and <code>glossary.md</code> (every term) &nbsp;·&nbsp;
@@ -53,7 +53,7 @@
     </header>
 
     <div class="callout note">
-      <p><strong>How to use this page.</strong> Skim Sections 1–5 the day before an interview. Work through Sections 6–8 a few days earlier: read each question, answer it <em>out loud</em>, then open it and compare. The answers are deliberately short, because a strong interview answer is short. Each one names the lesson to reread if your answer was shaky. Figures marked <em>verify</em> are HotSpot defaults that can change between JDK versions, so check them with <code>java -XX:+PrintFlagsFinal -version</code> rather than quoting them as laws. Printing to PDF? Open the questions you want first; closed answers stay hidden on paper.</p>
+      <p><strong>How to use this page.</strong> Skim Sections 1–5 the day before an interview. Work through Sections 6–8 a few days earlier. Read each question, answer it <em>out loud</em>, then open it and compare. The answers are short on purpose, because a strong interview answer is short. Each one names the lesson to reread if your answer was shaky. Numbers marked <em>verify</em> are HotSpot defaults that can change between JDK versions. Check them with <code>java -XX:+PrintFlagsFinal -version</code>, and do not quote them as fixed laws. Printing to PDF? Open the questions you want first. Closed answers stay hidden on paper.</p>
     </div>
 
     <!-- ===================== SECTION 1 — ONE PAGE ===================== -->
@@ -148,7 +148,7 @@
           <text class="fig-small" x="656" y="334" text-anchor="middle">(L01, L06)</text>
           <path class="fig-arrow-accent" d="M656,298 L656,210" marker-end="url(#csaa)"/>
         </svg>
-        <figcaption><strong>Every lesson is one part of this picture.</strong> Amber = your code and the per-thread stacks running it; teal = JVM machinery and shared regions; indigo = the generations inside the heap; grey = frames, and the tools that look in from outside. Lesson 00 sits under all of it: a pinned Java 21, so the picture is the one you actually run.</figcaption>
+        <figcaption><strong>Every lesson is one part of this picture.</strong> Amber = your code, and the per-thread stacks running it. Teal = JVM machinery and shared areas. Indigo = the generations inside the heap. Grey = frames, and the tools that look in from outside. Lesson 00 sits under all of it: a pinned Java 21, so this picture matches what you really run.</figcaption>
       </figure>
 
       <p><strong>The life of one object</strong> — the answer to almost any &ldquo;walk me through what happens when…&rdquo; question:</p>
@@ -424,22 +424,22 @@
         <table>
           <thead><tr><th>Myth</th><th>Fact</th></tr></thead>
           <tbody>
-            <tr><td>&ldquo;Java passes objects by reference.&rdquo;</td><td>Java passes everything by value; for objects the value is a reference. A callee can change the object, never the caller's variable.</td></tr>
-            <tr><td>&ldquo;Java compiles to machine code.&rdquo;</td><td><code>javac</code> compiles to bytecode; the JIT compiles hot bytecode to machine code at run time.</td></tr>
+            <tr><td>&ldquo;Java passes objects by reference.&rdquo;</td><td>Java passes everything by value. For objects, the value is a reference. A called method can change the object, but never the caller's variable.</td></tr>
+            <tr><td>&ldquo;Java compiles to machine code.&rdquo;</td><td><code>javac</code> compiles to bytecode. The JIT compiles hot bytecode to machine code while the program runs.</td></tr>
             <tr><td>&ldquo;Write once, run anywhere means any Java version.&rdquo;</td><td>It means any machine. An older JVM always refuses a newer class file.</td></tr>
             <tr><td>&ldquo;Java can't leak memory — it has GC.&rdquo;</td><td>Anything still reachable is kept. Unbounded static collections leak.</td></tr>
-            <tr><td>&ldquo;Setting a variable to <code>null</code> frees memory.&rdquo;</td><td>It makes an object eligible; the collector reclaims it later, on its own schedule.</td></tr>
-            <tr><td>&ldquo;Call <code>System.gc()</code> to clean up.&rdquo;</td><td>A request, usually a full GC — an expensive pause. Never in application code.</td></tr>
-            <tr><td>&ldquo;Two objects pointing at each other are never collected.&rdquo;</td><td>Java traces from roots; unreachable cycles are garbage.</td></tr>
-            <tr><td>&ldquo;Creating objects is expensive — pool them.&rdquo;</td><td>Allocation is a pointer bump; non-escaping objects may never exist. Pooling often makes things worse.</td></tr>
-            <tr><td>&ldquo;Small methods are slow — merge them.&rdquo;</td><td>Hot small methods are inlined; the call disappears.</td></tr>
+            <tr><td>&ldquo;Setting a variable to <code>null</code> frees memory.&rdquo;</td><td>It makes an object able to be collected. The collector frees it later, when it chooses.</td></tr>
+            <tr><td>&ldquo;Call <code>System.gc()</code> to clean up.&rdquo;</td><td>It is only a request, and usually causes a full GC: an expensive pause. Never use it in application code.</td></tr>
+            <tr><td>&ldquo;Two objects pointing at each other are never collected.&rdquo;</td><td>Java traces from the roots. Unreachable cycles are garbage.</td></tr>
+            <tr><td>&ldquo;Creating objects is expensive — pool them.&rdquo;</td><td>Making an object is just a pointer bump. Objects that never escape may never exist at all. Pooling often makes things worse.</td></tr>
+            <tr><td>&ldquo;Small methods are slow — merge them.&rdquo;</td><td>Hot small methods are inlined, so the call disappears.</td></tr>
             <tr><td>&ldquo;Average GC pause is what matters.&rdquo;</td><td>Users feel the maximum. Read the max and the full-GC count.</td></tr>
-            <tr><td>&ldquo;More heap fixes any OutOfMemoryError.&rdquo;</td><td>Not for Metaspace, native threads or leaks — for a leak, more heap only delays the crash.</td></tr>
-            <tr><td>&ldquo;<code>StackOverflowError</code> needs more <code>-Xmx</code>.&rdquo;</td><td>The stack is not the heap. Usually a missing base case; the stack flag is <code>-Xss</code>.</td></tr>
-            <tr><td>&ldquo;Changing a <code>public static final</code> constant updates all callers.&rdquo;</td><td>Compile-time constants are inlined into callers; recompile them.</td></tr>
-            <tr><td>&ldquo;An import loads a class.&rdquo;</td><td>Imports vanish at compile time; nothing loads until first real use.</td></tr>
-            <tr><td>&ldquo;A heap dump is just a debug file.&rdquo;</td><td>It contains every value in memory, passwords included. Treat it as sensitive data.</td></tr>
-            <tr><td>&ldquo;Every 'made not entrant' is a deoptimization.&rdquo;</td><td>At tier 3 it is usually replacement by tier 4; tier 4 retirements are deoptimizations.</td></tr>
+            <tr><td>&ldquo;More heap fixes any OutOfMemoryError.&rdquo;</td><td>Not for Metaspace, native threads or leaks. For a leak, more heap only delays the crash.</td></tr>
+            <tr><td>&ldquo;<code>StackOverflowError</code> needs more <code>-Xmx</code>.&rdquo;</td><td>The stack is not the heap. It is usually a missing base case. The stack flag is <code>-Xss</code>.</td></tr>
+            <tr><td>&ldquo;Changing a <code>public static final</code> constant updates all callers.&rdquo;</td><td>Compile-time constants are copied into callers. Recompile the callers.</td></tr>
+            <tr><td>&ldquo;An import loads a class.&rdquo;</td><td>Imports disappear at compile time. Nothing loads until it is really used.</td></tr>
+            <tr><td>&ldquo;A heap dump is just a debug file.&rdquo;</td><td>It holds every value in memory, passwords included. Treat it as sensitive data.</td></tr>
+            <tr><td>&ldquo;Every 'made not entrant' is a deoptimization.&rdquo;</td><td>At tier 3, it is usually just a replacement by tier 4. Tier 4 retirements are deoptimizations.</td></tr>
           </tbody>
         </table>
       </div>
@@ -449,270 +449,302 @@
     <section id="s6">
       <h2><span class="sec-num">6</span> Interview questions</h2>
 
-      <p>Answer each one out loud first, then open it. A good answer names the mechanism, then the consequence.</p>
+      <p>Answer each one out loud first, then open it. A good answer names the mechanism first, then what it causes.</p>
 
       <h3>6.1 Bytecode and the class file</h3>
 
       <details class="check">
         <summary>What is the difference between the JDK, the JRE and the JVM?</summary>
-        <div class="answer-body">The JVM is the engine that runs bytecode and manages memory. The JRE is the JVM plus the standard library — enough to run programs. The JDK is the JRE plus developer tools such as <code>javac</code>, <code>javap</code> and <code>jcmd</code>. Developers install a JDK; modern Java no longer ships a separate JRE. <em>(L00)</em></div>
+        <div class="answer-body">The JVM is the engine that runs bytecode and manages memory. The JRE is the JVM plus the standard library. That is enough to run programs. The JDK is the JRE plus developer tools such as <code>javac</code>, <code>javap</code> and <code>jcmd</code>. Developers install a JDK. Modern Java no longer offers a separate JRE. <em>(L00)</em></div>
       </details>
 
       <details class="check">
         <summary>What does &ldquo;write once, run anywhere&rdquo; really mean, and where does it break?</summary>
-        <div class="answer-body">The compiled class file — bytecode for an imaginary machine — runs unchanged on any machine with a JVM. It breaks across Java versions (an older JVM refuses newer class files), and around the edges: native libraries, hard-coded file paths, platform encodings, and timing-dependent concurrency bugs. <em>(L01)</em></div>
+        <div class="answer-body">The compiled class file (bytecode for an imaginary machine) runs unchanged on any machine with a JVM. It breaks across Java versions, because an older JVM refuses newer class files. It also breaks at the edges: native libraries, hard-coded file paths, platform text encodings, and concurrency bugs that depend on timing. <em>(L01)</em></div>
       </details>
 
       <details class="check">
         <summary>Decode: <code>UnsupportedClassVersionError … class file version 65.0, this runtime only recognizes 61.0</code>.</summary>
-        <div class="answer-body">Subtract 44: the file was compiled for Java 21, the JVM running it is Java 17. Older JVMs always refuse newer files. The usual fix is to run on Java 21 or later; the alternative is to build with <code>--release 17</code> and actually test on 17. You can check a jar without running it: <code>javap -v</code> and read <code>major version</code>. <em>(L01)</em></div>
+        <div class="answer-body">Subtract 44. The file was compiled for Java 21. The JVM running it is Java 17. Older JVMs always refuse newer files. The usual fix is to run on Java 21 or later. The other choice is to build with <code>--release 17</code> and really test on 17. You can check a jar without running it: use <code>javap -v</code> and read <code>major version</code>. <em>(L01)</em></div>
       </details>
 
       <details class="check">
         <summary>Why use <code>--release</code> instead of <code>-source</code>/<code>-target</code>?</summary>
-        <div class="answer-body"><code>-source</code>/<code>-target</code> set the language level and class file version but still compile against the <em>current</em> JDK's library, so code can call a method that does not exist on the target release and fail at run time with <code>NoSuchMethodError</code>. <code>--release</code> also swaps in that release's API definitions, so the compiler catches it. <em>(L01)</em></div>
+        <div class="answer-body"><code>-source</code>/<code>-target</code> set the language level and the class file version. But they still compile against the <em>current</em> JDK's library. So your code can call a method that does not exist on the target release. It then fails while running, with <code>NoSuchMethodError</code>. <code>--release</code> also uses that release's library, so the compiler catches the mistake. <em>(L01)</em></div>
       </details>
 
       <details class="check">
         <summary>What does <code>new Foo()</code> compile to, and why is there a <code>dup</code>?</summary>
-        <div class="answer-body"><code>new</code> allocates a blank object and pushes a reference; <code>dup</code> copies the reference; <code>invokespecial Foo.&lt;init&gt;</code> runs the constructor, consuming one copy. The <code>dup</code> leaves a reference on the operand stack to assign or return, because the constructor call consumes the original. <em>(L01)</em></div>
+        <div class="answer-body"><code>new</code> makes a blank object and pushes a reference to it. <code>dup</code> copies the reference. <code>invokespecial Foo.&lt;init&gt;</code> runs the constructor, which uses up one copy. The <code>dup</code> is needed because the constructor call uses up the original. The copy stays on the operand stack, ready to assign or return. <em>(L01)</em></div>
       </details>
 
       <details class="check">
         <summary>Why does string concatenation compile to <code>invokedynamic</code>, and what else uses it?</summary>
-        <div class="answer-body">Since Java 9, <code>javac</code> emits one <code>invokedynamic</code> that asks a JDK helper (<code>makeConcatWithConstants</code>) to build an optimised routine the first time the line runs. The JDK can then improve concatenation without anyone recompiling. Lambdas use the same mechanism via <code>LambdaMetafactory</code>. <em>(L01)</em></div>
+        <div class="answer-body">Since Java 9, <code>javac</code> writes one <code>invokedynamic</code>. The first time the line runs, it asks a JDK helper (<code>makeConcatWithConstants</code>) to build a fast routine. That way the JDK can improve string joining without anyone recompiling. Lambdas use the same mechanism, through <code>LambdaMetafactory</code>. <em>(L01)</em></div>
       </details>
 
       <details class="check">
         <summary>Why is the JVM a stack machine rather than a register machine?</summary>
-        <div class="answer-body">Stack instructions need no register operands (<code>iadd</code> takes its inputs from the top of the operand stack), so bytecode is compact and makes no assumptions about how many registers the real chip has. Mapping the stack onto real registers is the JIT's job. <em>(L01)</em></div>
+        <div class="answer-body">Stack instructions do not need to name registers. For example, <code>iadd</code> takes its inputs from the top of the operand stack. So bytecode is compact, and it does not assume anything about how many registers the real chip has. Mapping the stack onto real registers is the JIT's job. <em>(L01)</em></div>
       </details>
 
       <h3>6.2 Class loading</h3>
 
       <details class="check">
         <summary>Name the built-in class loaders. Why does <code>String.class.getClassLoader()</code> return <code>null</code>?</summary>
-        <div class="answer-body">Bootstrap (loads <code>java.base</code>), platform (the rest of the JDK) and application (your class path), in a parent chain. The bootstrap loader is implemented inside the JVM and has no Java object, so <code>null</code> is how it is represented — not an error. Calling a method on that result is a guaranteed <code>NullPointerException</code>. <em>(L02)</em></div>
+        <div class="answer-body">Bootstrap (loads <code>java.base</code>), platform (the rest of the JDK) and application (your class path). They form a parent chain. The bootstrap loader is built inside the JVM and has no Java object. So <code>null</code> is how it is shown. It is not an error. Calling a method on that result always throws a <code>NullPointerException</code>. <em>(L02)</em></div>
       </details>
 
       <details class="check">
         <summary>What is parent delegation and why does it exist?</summary>
-        <div class="answer-body">A loader asks its parent before searching its own sources, so classes are found as high in the chain as possible. Three benefits follow. Core classes cannot be replaced: a fake <code>java.lang.String</code> on your class path is never reached. Each JDK class exists exactly once, so there is one <code>String</code> type. And &ldquo;not found&rdquo; means genuinely nowhere. It is a convention in <code>loadClass</code>; servlet containers and plugin systems deliberately invert it. <em>(L02)</em></div>
+        <div class="answer-body">A loader asks its parent before searching its own places. So classes are found as high up the chain as possible. This gives three benefits:
+          <ul>
+            <li>Core classes cannot be replaced. A fake <code>java.lang.String</code> on your class path is never reached.</li>
+            <li>Each JDK class exists exactly once, so there is only one <code>String</code> type.</li>
+            <li>&ldquo;Not found&rdquo; really means nowhere.</li>
+          </ul>
+          It is a habit written in <code>loadClass</code>, not a law. Servlet containers and plugin systems turn it around on purpose. <em>(L02)</em></div>
       </details>
 
       <details class="check">
         <summary><code>ClassNotFoundException</code> versus <code>NoClassDefFoundError</code>?</summary>
-        <div class="answer-body"><code>ClassNotFoundException</code> (checked) comes from a lookup by name as text — <code>Class.forName</code>, a framework reading config — that found nothing: a name or class-path problem. <code>NoClassDefFoundError</code> (an Error) means compiled code refers to a class that is missing at run time: a packaging problem. <code>NoClassDefFoundError: Could not initialize class X</code> is different again: X is present, but its static initializer failed earlier. <em>(L02)</em></div>
+        <div class="answer-body"><code>ClassNotFoundException</code> (a checked exception) comes from a lookup by name, as text, that found nothing. Examples are <code>Class.forName</code> or a framework reading config. It is a name or class-path problem. <code>NoClassDefFoundError</code> (an Error) means compiled code points to a class that is missing at run time. It is a packaging problem. <code>NoClassDefFoundError: Could not initialize class X</code> is different again. X is present, but its static initializer failed earlier. <em>(L02)</em></div>
       </details>
 
       <details class="check">
         <summary>Exactly when is a class initialized?</summary>
-        <div class="answer-body">On first <code>new</code>, first call of a static method it declares, first use of a non-constant static field it declares, <code>Class.forName(name)</code>, when a subclass is initialized (parent first), or when it is the main class. Not by an import, <code>Foo.class</code>, <code>new Foo[n]</code>, reading a compile-time constant, <code>loadClass</code>, or reading a superclass's static field through a subclass name. <em>(L02)</em></div>
+        <div class="answer-body">It is initialized on the first of these: <code>new</code>; a call to a static method it declares; use of a static field it declares that is not a constant; <code>Class.forName(name)</code>; a subclass being initialized (the parent goes first); or being the main class. It is <em>not</em> initialized by: an import, <code>Foo.class</code>, <code>new Foo[n]</code>, reading a compile-time constant, <code>loadClass</code>, or reading a superclass's static field through a subclass name. <em>(L02)</em></div>
       </details>
 
       <details class="check">
         <summary>A library changed <code>public static final String VERSION</code> from &ldquo;1.0&rdquo; to &ldquo;2.0&rdquo;, but the application still prints 1.0. Why?</summary>
-        <div class="answer-body">A <code>static final</code> primitive or <code>String</code> assigned a constant expression is a compile-time constant. <code>javac</code> copies its value into every caller's class file. The application holds its own copy and never reads the library's field. Recompile the callers — and in a public API, expose changeable values through a method. <em>(L02)</em></div>
+        <div class="answer-body">A <code>static final</code> primitive or <code>String</code> set to a constant expression is a compile-time constant. <code>javac</code> copies its value into every caller's class file. The application holds its own copy and never reads the library's field. Recompile the callers. In a public API, offer values that may change through a method. <em>(L02)</em></div>
       </details>
 
       <details class="check">
         <summary>How can you get <code>ClassCastException: com.acme.Config cannot be cast to com.acme.Config</code>?</summary>
-        <div class="answer-body">A class's runtime identity is its name <em>plus</em> its defining loader. Two loaders — say the application loader and a plugin loader — each defined their own <code>Config</code>, giving two incompatible types. The message lists both loaders. Usually a shared jar is present in two places; fix it so only one loader can define the class. <em>(L02)</em></div>
+        <div class="answer-body">A class is known by its name <em>plus</em> the loader that defined it. Two loaders, say the application loader and a plugin loader, each defined their own <code>Config</code>. That gives two types that do not fit together. The message lists both loaders. Usually a shared jar is in two places. Fix it so only one loader can define the class. <em>(L02)</em></div>
       </details>
 
       <details class="check">
         <summary>Is static initialization thread-safe? How is that used in practice?</summary>
-        <div class="answer-body">Yes. The JVM runs <code>&lt;clinit&gt;</code> exactly once per loader, under its own lock, and other threads block until it finishes. The initialization-on-demand holder idiom exploits this: a private nested <code>Holder</code> class holds a static instance, which is created lazily and thread-safely on first access with no <code>synchronized</code>. The flip side: if <code>&lt;clinit&gt;</code> throws, the class is unusable for the rest of the run. <em>(L02)</em></div>
+        <div class="answer-body">Yes. The JVM runs <code>&lt;clinit&gt;</code> exactly once per loader, under its own lock. Other threads wait until it finishes. The initialization-on-demand holder idiom uses this. A private nested <code>Holder</code> class holds a static instance. The instance is made only on first use, safely, with no <code>synchronized</code>. The downside: if <code>&lt;clinit&gt;</code> throws, the class cannot be used for the rest of the run. <em>(L02)</em></div>
       </details>
 
       <h3>6.3 Memory</h3>
 
       <details class="check">
         <summary>Stack versus heap?</summary>
-        <div class="answer-body">Each thread has its own fixed-size stack of frames, holding the locals, operand stack and return address of each in-progress call. It is reclaimed instantly when a method returns. The heap is shared by all threads and holds every object. It is reclaimed by the garbage collector, based on reachability. A local of object type sits on the stack and holds a reference to a heap object. <em>(L03)</em></div>
+        <div class="answer-body">Each thread has its own fixed-size stack of frames. Each frame holds the local variables, operand stack and return address of one call that is still running. A frame is freed instantly when its method returns. The heap is shared by all threads and holds every object. The garbage collector frees it, based on reachability. A local variable of object type sits on the stack and holds a reference to a heap object. <em>(L03)</em></div>
       </details>
 
       <details class="check">
         <summary>Is Java pass-by-value or pass-by-reference? Then why did my object change?</summary>
-        <div class="answer-body">Always pass-by-value. For object types the value copied is the reference, so caller and callee point at the same heap object. Mutating that object through the copy is visible to the caller. Reassigning the parameter only changes the callee's own frame slot, so the caller never sees it. <em>(L03)</em></div>
+        <div class="answer-body">Always pass-by-value. For object types, the value copied is the reference. So the caller and the called method point at the same heap object. Changing that object through the copy is visible to the caller. Reassigning the parameter only changes the called method's own frame slot, so the caller never sees it. <em>(L03)</em></div>
       </details>
 
       <details class="check">
         <summary>What replaced PermGen, and why?</summary>
-        <div class="answer-body">In Java 8, Metaspace replaced PermGen for class metadata. Metaspace lives in native memory and is unbounded by default, so the old small fixed limit (<code>OOM: PermGen space</code> after a few redeploys) went away. A class-loader leak now consumes machine memory instead; set <code>-XX:MaxMetaspaceSize</code> if you want it to fail visibly. (Interned strings had already moved to the heap in Java 7.) <em>(L03)</em></div>
+        <div class="answer-body">In Java 8, Metaspace replaced PermGen for class information. Metaspace lives in native memory and has no limit by default. So the old small fixed limit went away (<code>OOM: PermGen space</code> after a few redeploys). Now a class-loader leak eats the machine's memory instead. Set <code>-XX:MaxMetaspaceSize</code> if you want it to fail clearly. (Interned strings had already moved to the heap in Java 7.) <em>(L03)</em></div>
       </details>
 
       <details class="check">
         <summary><code>StackOverflowError</code> versus <code>OutOfMemoryError</code> — causes and fixes?</summary>
-        <div class="answer-body"><code>StackOverflowError</code>: one thread's fixed stack ran out of frames. It is usually runaway recursion — a missing base case, or two <code>toString</code>s calling each other — and the repeated lines in the trace are the diagnosis. Only legitimately deep recursion justifies raising <code>-Xss</code> (which applies per thread). <code>OutOfMemoryError</code>: a shared region is full. The words after the colon name the region, and so the investigation. <em>(L03)</em></div>
+        <div class="answer-body"><code>StackOverflowError</code>: one thread's fixed stack ran out of room for frames. It is usually runaway recursion: a missing base case, or two <code>toString</code>s calling each other. The repeated lines in the trace tell you the cause. Only recursion that truly needs to go deep is a reason to raise <code>-Xss</code> (which is per thread). <code>OutOfMemoryError</code>: a shared area is full. The words after the colon name the area, and so where to look. <em>(L03)</em></div>
       </details>
 
       <details class="check">
         <summary>Why can a JVM process use far more memory than <code>-Xmx</code>?</summary>
-        <div class="answer-body"><code>-Xmx</code> caps only the heap. On top of it come Metaspace, the code cache, one stack per thread, direct (off-heap) buffers, GC bookkeeping, and the JVM's own native memory. A process with many threads, or heavy NIO use, can exceed its heap by gigabytes. Size containers for all of it. <em>(L03)</em></div>
+        <div class="answer-body"><code>-Xmx</code> limits only the heap. On top of it come Metaspace, the code cache, one stack per thread, direct (off-heap) buffers, GC record-keeping, and the JVM's own native memory. A process with many threads, or heavy NIO use, can go over its heap by gigabytes. Size containers for all of it. <em>(L03)</em></div>
       </details>
 
       <details class="check">
         <summary>Are local variables thread-safe? Are the objects they point to?</summary>
-        <div class="answer-body">The variables, yes: each lives in a frame on one thread's stack that no other thread can reach. The objects they reference, no: those are on the shared heap, and any thread holding a reference can modify them. &ldquo;Keep state local&rdquo; works only for primitives and objects that never escape the thread. <em>(L03)</em></div>
+        <div class="answer-body">The variables, yes. Each one lives in a frame on one thread's stack, and no other thread can reach it. The objects they point to, no. Those are on the shared heap, and any thread holding a reference can change them. &ldquo;Keep state local&rdquo; only works for primitives, and for objects that never leave the thread. <em>(L03)</em></div>
       </details>
 
       <h3>6.4 Garbage collection fundamentals</h3>
 
       <details class="check">
         <summary>How does the JVM decide an object is garbage? What are GC roots?</summary>
-        <div class="answer-body">An object is garbage when no chain of references from any GC root reaches it. The roots are the local variables in every live frame, static fields of loaded classes, running threads, and some JVM-internal references. Collectors mark everything reachable by tracing from the roots and reclaim the rest. <em>(L04)</em></div>
+        <div class="answer-body">An object is garbage when no chain of references from any GC root reaches it. The roots are the local variables in every live frame, the static fields of loaded classes, running threads, and some references held inside the JVM. Collectors trace from the roots, mark everything reachable, and free the rest. <em>(L04)</em></div>
       </details>
 
       <details class="check">
         <summary>Why doesn't Java use reference counting?</summary>
-        <div class="answer-body">Counting can never free cycles. Two objects pointing at each other keep each other's counts above zero forever, even when nothing else can reach them, and real data structures are full of cycles. Tracing from the roots ignores cycles entirely: an unreachable cycle is simply never reached. <em>(L04)</em></div>
+        <div class="answer-body">Counting can never free cycles. Two objects that point at each other keep each other's counts above zero forever, even when nothing else can reach them. And real data structures are full of cycles. Tracing from the roots ignores cycles completely. An unreachable cycle is simply never reached. <em>(L04)</em></div>
       </details>
 
       <details class="check">
         <summary>Can a Java program leak memory? Give examples.</summary>
-        <div class="answer-body">Yes. A Java leak is an object that is no longer needed but still reachable. Examples: a static map used as a cache without eviction; listeners registered and never removed; <code>ThreadLocal</code> values on pooled threads; a non-static inner class or lambda capturing <code>this</code> and registered long-term; class loaders kept alive across redeploys. <em>(L04)</em></div>
+        <div class="answer-body">Yes. A Java leak is an object that is no longer needed but is still reachable. Examples:
+          <ul>
+            <li>a static map used as a cache that never removes old entries,</li>
+            <li>listeners that are added and never removed,</li>
+            <li><code>ThreadLocal</code> values on pooled threads,</li>
+            <li>a non-static inner class or lambda that captures <code>this</code> and is registered for a long time,</li>
+            <li>class loaders kept alive across redeploys.</li>
+          </ul>
+          <em>(L04)</em></div>
       </details>
 
       <details class="check">
         <summary>Explain the generational hypothesis and how a minor GC works.</summary>
-        <div class="answer-body">Most objects die young, so new objects go into a small young generation (Eden plus two survivor spaces) that is collected often. When Eden fills, a minor GC pauses briefly and copies live objects from Eden and the occupied survivor space into the empty survivor space, adding one to each object's age. It then declares Eden and the old survivor empty. The cost is proportional to survivors; garbage is never visited. At the tenuring threshold, objects are promoted to the old generation instead. <em>(L04)</em></div>
+        <div class="answer-body">Most objects die young. So new objects go into a small young generation (Eden plus two survivor spaces) that is collected often. When Eden fills, a minor GC pauses briefly. It copies the live objects from Eden and the used survivor space into the empty survivor space, and adds one to each object's age. Then it marks Eden and the old survivor space as empty. The cost depends on how many objects survive. Garbage is never visited. At the tenuring threshold, objects are promoted to the old generation instead. <em>(L04)</em></div>
       </details>
 
       <details class="check">
         <summary>Minor, major and full GC — what is the difference?</summary>
-        <div class="answer-body">A minor GC collects only the young generation: frequent and cheap. A major GC collects the old generation: rare and expensive. A full GC collects the whole heap, often Metaspace too, and is usually the longest stop-the-world pause. People use the terms loosely, so say what you mean. <em>(L04)</em></div>
+        <div class="answer-body">A minor GC collects only the young generation. It is frequent and cheap. A major GC collects the old generation. It is rare and expensive. A full GC collects the whole heap, often Metaspace too. It is usually the longest stop-the-world pause. People use these words loosely, so say what you mean. <em>(L04)</em></div>
       </details>
 
       <details class="check">
         <summary>What is premature promotion, and how do you fix it?</summary>
-        <div class="answer-body">Short-lived objects get pushed into the old generation too early, usually because the survivor space overflowed. The old generation then fills with garbage that only expensive collections reclaim. The tell-tale sign is an old generation that fills fast but drops back to the same level after full GCs. The fix is a larger young generation or survivor spaces — not a larger heap. <em>(L04)</em></div>
+        <div class="answer-body">Short-lived objects get pushed into the old generation too early. Usually the survivor space overflowed. The old generation then fills with garbage that only expensive collections can free. The sign is an old generation that fills fast, but drops back to the same level after full GCs. The fix is a bigger young generation or bigger survivor spaces, not a bigger heap. <em>(L04)</em></div>
       </details>
 
       <details class="check">
         <summary>If a minor GC only scans the young generation, how does it find old objects that point to young ones?</summary>
-        <div class="answer-body">Through the card table. The old generation is divided into small cards, and a write barrier — a little code the JIT adds to every reference store — marks a card dirty when an old object gets a reference. A minor GC scans only the dirty cards as extra roots. <em>(L04)</em></div>
+        <div class="answer-body">Through the card table. The old generation is divided into small cards. A write barrier is a little code the JIT adds to every reference store. When an old object gets a reference, the barrier marks its card dirty. A minor GC scans only the dirty cards, as extra roots. <em>(L04)</em></div>
       </details>
 
       <details class="check">
         <summary>What is a weak reference, and what is the classic <code>WeakHashMap</code> trap?</summary>
-        <div class="answer-body">A <code>WeakReference</code> points at an object without keeping it alive. Once only weak references remain, the collector may reclaim the object and <code>get()</code> returns <code>null</code>. <code>WeakHashMap</code> holds its keys weakly, so entries vanish when keys become unreachable. The trap: if a value refers back to its own key, the map's strong reference to the value keeps the key reachable, and the entry never goes. <em>(L04)</em></div>
+        <div class="answer-body">A <code>WeakReference</code> points at an object without keeping it alive. Once only weak references are left, the collector may free the object, and <code>get()</code> returns <code>null</code>. <code>WeakHashMap</code> holds its keys weakly. So entries disappear when their keys become unreachable. The trap: say a value refers back to its own key. The map holds the value strongly, and the value keeps the key reachable. So the entry never goes. <em>(L04)</em></div>
       </details>
 
       <details class="check">
         <summary>Why shouldn't you use <code>finalize()</code>?</summary>
-        <div class="answer-body">It runs at an unpredictable time or never, slows the collector, can resurrect objects, and was deprecated for removal in Java 18 (JEP 421). Release resources with try-with-resources; <code>java.lang.ref.Cleaner</code> is a last-resort safety net. <em>(L04)</em></div>
+        <div class="answer-body">It runs at a time you cannot predict, or never. It slows the collector. It can bring dead objects back to life. It was deprecated for removal in Java 18 (JEP 421). Release resources with try-with-resources. Use <code>java.lang.ref.Cleaner</code> only as a last-resort safety net. <em>(L04)</em></div>
       </details>
 
       <h3>6.5 Collectors and GC logs</h3>
 
       <details class="check">
         <summary>Throughput versus latency: which collector for a nightly batch job, and which for a low-latency API?</summary>
-        <div class="answer-body">Batch: Parallel. Only total run time matters, and with no concurrent work it has the highest throughput; long pauses hurt nobody. Low-latency API: ZGC for strict, sub-millisecond-scale pause needs or huge heaps; otherwise G1, the default, with its pause goal. Shorter pauses are always paid for with background CPU and barriers — that is, throughput. <em>(L05)</em></div>
+        <div class="answer-body">Batch job: Parallel. Only the total run time matters. With no background work, it has the highest throughput, and long pauses hurt nobody. Low-latency API: ZGC if you need pauses under a millisecond or have a huge heap. Otherwise G1, the default, with its pause goal. You always pay for shorter pauses with background CPU and barriers. In other words, with throughput. <em>(L05)</em></div>
       </details>
 
       <details class="check">
         <summary>How does G1 work?</summary>
-        <div class="answer-body">The heap is split into equal regions, each with a role: Eden, survivor, old, humongous or free. When the old generation reaches a threshold, G1 marks it concurrently, finishing with short Remark and Cleanup pauses. It then runs mixed collections that evacuate the young regions plus the old regions with the most garbage (&ldquo;garbage first&rdquo;), sizing each collection set to the pause goal <code>-XX:MaxGCPauseMillis</code> (default 200 ms). Objects of at least half a region are humongous. If G1 falls behind, it falls back to a full GC. <em>(L05)</em></div>
+        <div class="answer-body">The heap is split into equal regions. Each region has a role: Eden, survivor, old, humongous or free. When the old generation gets full enough, G1 marks it while your code runs. It finishes with two short pauses, Remark and Cleanup. Then it runs mixed collections. These copy out the young regions plus the old regions with the most garbage (&ldquo;garbage first&rdquo;). G1 sizes each collection set to fit the pause goal, <code>-XX:MaxGCPauseMillis</code> (default 200 ms). Objects of at least half a region are humongous. If G1 falls behind, it falls back to a full GC. <em>(L05)</em></div>
       </details>
 
       <details class="check">
         <summary>How does ZGC keep pauses under a millisecond, and what does it cost?</summary>
-        <div class="answer-body">It marks <em>and moves</em> objects concurrently. A load barrier on every reference read checks whether the referenced object has moved and fixes the reference before use, so the stop-the-world parts stay tiny and do not grow with heap size. The costs: the barrier on every read, background CPU, and the heap headroom it needs — so usually lower throughput than Parallel or G1. Java 21 added a generational mode (<code>-XX:+ZGenerational</code>). <em>(L05)</em></div>
+        <div class="answer-body">It marks <em>and moves</em> objects while your code runs. A load barrier runs on every reference read. It checks whether the object has moved, and fixes the reference before it is used. So the stop-the-world parts stay tiny, and they do not grow with heap size. The costs are the barrier on every read, background CPU, and the spare heap it needs. So it usually has lower throughput than Parallel or G1. Java 21 added a generational mode (<code>-XX:+ZGenerational</code>). <em>(L05)</em></div>
       </details>
 
       <details class="check">
         <summary>Read this line: <code>GC(14) Pause Young (Concurrent Start) (G1 Humongous Allocation) 48M-&gt;45M(64M) 3.112ms</code>.</summary>
-        <div class="answer-body">The 15th collection was a G1 young pause, triggered by allocating a humongous object, that also starts a concurrent marking cycle. Heap use went from 48 MB to 45 MB in a 64 MB committed heap: it freed almost nothing, so live data is close to filling the heap. The pause lasted 3.1 ms. Worth watching: a nearly full heap and frequent humongous allocations. <em>(L05)</em></div>
+        <div class="answer-body">This was the 15th collection. It was a G1 young pause, started by making a humongous object, and it also starts a concurrent marking cycle. Heap use went from 48 MB to 45 MB, in a 64 MB committed heap. It freed almost nothing, so live data nearly fills the heap. The pause lasted 3.1 ms. Watch out for two things: a nearly full heap, and frequent humongous allocations. <em>(L05)</em></div>
       </details>
 
       <details class="check">
         <summary>Which numbers in a GC log matter most, and why not the average pause?</summary>
-        <div class="answer-body">The count of full GCs (ideally zero); the maximum pause (what the unluckiest request felt); and the heap after full GCs over time (live data — rising means a leak). An average spreads one long full GC across thousands of short pauses until it disappears. <em>(L05)</em></div>
+        <div class="answer-body">Three numbers: the count of full GCs (ideally zero), the maximum pause (what the unluckiest request felt), and the heap after full GCs over time (that is the live data, and if it rises, it is a leak). An average spreads one long full GC across thousands of short pauses until you cannot see it. <em>(L05)</em></div>
       </details>
 
       <details class="check">
         <summary>Which collector runs if you set none? Can it surprise you?</summary>
-        <div class="answer-body">G1 since Java 9 — unless the JVM judges the machine small (roughly fewer than 2 CPUs or less than about 1792 MB; verify), in which case it silently picks Serial. In a container it reads the container's limits, so a 1-CPU pod may run Serial while laptops run G1. Check the <code>Using …</code> line in the GC log, or set the collector explicitly. <em>(L05)</em></div>
+        <div class="answer-body">G1, since Java 9. But if the JVM decides the machine is small, it quietly picks Serial. Roughly, small means fewer than 2 CPUs or less than about 1792 MB (check this). In a container, the JVM reads the container's limits. So a 1-CPU pod may run Serial while laptops run G1. Check the <code>Using …</code> line in the GC log, or choose the collector yourself. <em>(L05)</em></div>
       </details>
 
       <details class="check">
         <summary>How do you enable GC logging on Java 21? On an already-running JVM?</summary>
-        <div class="answer-body">Start-up: <code>-Xlog:gc*:file=gc.log:time,uptime,level,tags:filecount=5,filesize=10m</code>, using unified logging (the old <code>-XX:+PrintGCDetails</code>/<code>-Xloggc</code> are pre-Java-9). Running JVM: <code>jcmd &lt;pid&gt; VM.log output=gc.log what=gc</code>. GC-level logging is cheap enough to leave on permanently. <em>(L05)</em></div>
+        <div class="answer-body">At startup: <code>-Xlog:gc*:file=gc.log:time,uptime,level,tags:filecount=5,filesize=10m</code>. This uses unified logging. (The old <code>-XX:+PrintGCDetails</code> and <code>-Xloggc</code> are from before Java 9.) On a running JVM: <code>jcmd &lt;pid&gt; VM.log output=gc.log what=gc</code>. Logging at the GC level is cheap enough to leave on all the time. <em>(L05)</em></div>
       </details>
 
       <h3>6.6 The JIT</h3>
 
       <details class="check">
         <summary>Why is the first run of code slow and the tenth fast?</summary>
-        <div class="answer-body">At first, classes are being loaded and initialized, the code runs in the interpreter, then in C1 code that is still profiling, while C1 and C2 compile on background threads. Once C2 installs optimised code (and OSR switches running loops over), it runs at full speed. That settling-in period is warm-up, and it is why a cold timing measures the wrong thing. <em>(L01, L06)</em></div>
+        <div class="answer-body">At first, classes are still being loaded and initialized. The code runs in the interpreter, then in C1 code that is still profiling. Meanwhile C1 and C2 compile on background threads. Once C2 installs its optimised code, the code runs at full speed. (OSR switches loops that are already running.) That settling-in time is warm-up. It is why a cold timing measures the wrong thing. <em>(L01, L06)</em></div>
       </details>
 
       <details class="check">
         <summary>Explain tiered compilation.</summary>
-        <div class="answer-body">Methods climb tiers as their call and loop counters cross thresholds: 0 (interpreter), then usually 3 (C1 with full profiling), then 4 (C2, optimised using that profile). Trivial methods go to tier 1 (C1, no profiling). Tier 2 is used when C2 is busy. C1 gives fast start-up and gathers the profile; C2 gives peak speed. <em>(L06)</em></div>
+        <div class="answer-body">Methods climb tiers as their call and loop counters pass set limits. They start at 0 (interpreter). Usually they go to 3 (C1 with full profiling), then 4 (C2, optimised using that profile). Very simple methods go to tier 1 (C1, no profiling). Tier 2 is used when C2 is busy. C1 gives fast startup and gathers the profile. C2 gives top speed. <em>(L06)</em></div>
       </details>
 
       <details class="check">
         <summary>What is on-stack replacement?</summary>
-        <div class="answer-body">Compiling a method while one of its loops is running, then transferring the loop's live state into the compiled code mid-loop. It is triggered by the back-edge counter, so a long loop in a method called only once — such as <code>main</code> — still gets compiled. Marked <code>%</code> in <code>-XX:+PrintCompilation</code>. <em>(L06)</em></div>
+        <div class="answer-body">It means compiling a method while one of its loops is running, then moving the loop's live state into the compiled code, in the middle of the loop. The back-edge counter starts it. So a long loop in a method called only once, such as <code>main</code>, still gets compiled. It is marked <code>%</code> in <code>-XX:+PrintCompilation</code>. <em>(L06)</em></div>
       </details>
 
       <details class="check">
         <summary>Why is inlining called the mother of all optimisations? What blocks it?</summary>
-        <div class="answer-body">Copying a callee into its caller removes the call and lets the compiler see across the boundary, enabling constant folding, dead-code removal and escape analysis. It is blocked by megamorphic call sites (three or more receiver classes seen), very large methods, and cold call sites. Monomorphic and bimorphic sites are inlined behind cheap type checks. <em>(L06)</em></div>
+        <div class="answer-body">Copying a called method into its caller removes the call. It also lets the compiler see across the old wall. That allows constant folding, removing dead code, and escape analysis. It is blocked by megamorphic call sites (three or more classes seen at one call), very large methods, and cold call sites. Monomorphic and bimorphic sites are inlined behind cheap type checks. <em>(L06)</em></div>
       </details>
 
       <details class="check">
         <summary>What is escape analysis? Does it mean allocation is free?</summary>
-        <div class="answer-body">After inlining, C2 checks whether each object can escape — be returned, stored in a field, passed to non-inlined code, or thrown. If not, it can scalar-replace the object (its fields become locals; no allocation) and elide locks on it. It is not universal: only C2 does it, only in hot code, and anything that escapes on any path keeps its allocation. So: short-lived local allocation is far cheaper than intuition says — measure before you pool. <em>(L06)</em></div>
+        <div class="answer-body">After inlining, C2 checks whether each object can escape: be returned, stored in a field, passed to code that was not inlined, or thrown. If not, it can replace the object with plain values (its fields become locals, and no object is made). It can also remove locks on it. It does not always apply. Only C2 does it, only in hot code. Anything that escapes on any path is still made. So: short-lived local objects are much cheaper than you would guess. Measure before you pool. <em>(L06)</em></div>
       </details>
 
       <details class="check">
         <summary>What is deoptimization? Is it safe?</summary>
-        <div class="answer-body">C2 compiles using speculative assumptions — a branch is never taken, a call site sees one class, only one implementation is loaded. When one breaks, the compiled code is made not entrant, running frames are converted back to interpreter frames, and the method later recompiles. It is completely safe: results never change, only speed dips briefly. <em>(L06)</em></div>
+        <div class="answer-body">C2 compiles using guesses: a branch is never taken, a call site sees only one class, only one implementation is loaded. When a guess breaks, the compiled code is made not entrant. Running frames are turned back into interpreter frames. Later, the method is compiled again. It is completely safe. Results never change. Only the speed dips for a short time. <em>(L06)</em></div>
       </details>
 
       <details class="check">
         <summary>How do you benchmark Java code properly?</summary>
-        <div class="answer-body">With JMH. It runs warm-up iterations before measuring, forks fresh JVMs so profiles do not leak between benchmarks, and provides a Blackhole that consumes results so the JIT cannot delete the work. A one-off <code>nanoTime</code> measurement mostly times the interpreter and the compiler. <em>(L01, L06)</em></div>
+        <div class="answer-body">With JMH. It runs warm-up rounds before measuring. It starts fresh JVMs, so profiles do not leak between benchmarks. It gives you a Blackhole that takes in results, so the JIT cannot delete the work. A one-off <code>nanoTime</code> measurement mostly times the interpreter and the compiler. <em>(L01, L06)</em></div>
       </details>
 
       <details class="check">
         <summary>Should I hand-inline small methods or pool short-lived objects for speed?</summary>
-        <div class="answer-body">Almost never. The JIT inlines hot small methods and may remove non-escaping allocations, so the &ldquo;optimisation&rdquo; only helps cold code that does not matter. Pooling can even hurt: pooled objects live long, get promoted, and cost the collector more. Write clear code and optimise what a profiler shows is hot. <em>(L06)</em></div>
+        <div class="answer-body">Almost never. The JIT inlines hot small methods, and may remove objects that never escape. So the &ldquo;optimisation&rdquo; only helps cold code, which does not matter. Pooling can even hurt. Pooled objects live long, get promoted, and cost the collector more. Write clear code, and optimise only what a profiler shows is hot. <em>(L06)</em></div>
       </details>
 
       <h3>6.7 Diagnosing a live JVM</h3>
 
       <details class="check">
         <summary>A service's memory grows steadily for days. How do you investigate, step by step?</summary>
-        <div class="answer-body">First, confirm it is the heap: does the GC log show the heap-after-full-GC level rising? Next, take two class histograms (<code>jcmd &lt;pid&gt; GC.class_histogram</code>) minutes apart and look for your own classes growing in step with load. Then take one heap dump at a quiet moment and open it in MAT or VisualVM: retained size points at the holder, and the path to GC roots names the field. Fix the removal rule, and confirm with flat histograms. Make sure <code>-XX:+HeapDumpOnOutOfMemoryError</code> is set for next time. <em>(L05, L07)</em></div>
+        <div class="answer-body">
+          <ol>
+            <li>Confirm it is the heap. Does the GC log show the heap-after-full-GC level rising?</li>
+            <li>Take two class histograms (<code>jcmd &lt;pid&gt; GC.class_histogram</code>) minutes apart. Look for your own classes growing in step with load.</li>
+            <li>Take one heap dump at a quiet moment, and open it in MAT or VisualVM. Retained size points at the holder. The path to GC roots names the field.</li>
+            <li>Fix the rule that should remove entries. Confirm with flat histograms.</li>
+            <li>Make sure <code>-XX:+HeapDumpOnOutOfMemoryError</code> is set for next time.</li>
+          </ol>
+          <em>(L05, L07)</em></div>
       </details>
 
       <details class="check">
         <summary>An application is frozen, the CPU is idle, nothing logs. What do you do?</summary>
-        <div class="answer-body">Take thread dumps (<code>jcmd &lt;pid&gt; Thread.print</code> or <code>jstack</code>), three of them a few seconds apart. Look for threads <code>BLOCKED</code> on each other's monitors; HotSpot prints &ldquo;Found one Java-level deadlock&rdquo; for simple cases. Also look for threads all waiting on one exhausted resource, such as a connection pool. A thread in the same frame in all three dumps is stuck. The usual deadlock fix is a consistent lock order. <em>(L07)</em></div>
+        <div class="answer-body">Take thread dumps (<code>jcmd &lt;pid&gt; Thread.print</code> or <code>jstack</code>), three of them a few seconds apart. Look for threads <code>BLOCKED</code> on each other's locks. For simple cases, HotSpot prints &ldquo;Found one Java-level deadlock&rdquo;. Also look for threads all waiting on one used-up resource, such as a connection pool. A thread in the same frame in all three dumps is stuck. The usual deadlock fix is to always take locks in the same order. <em>(L07)</em></div>
       </details>
 
       <details class="check">
         <summary>Shallow size versus retained size?</summary>
-        <div class="answer-body">Shallow size is the object itself — header and fields. Retained size is everything that would be freed if the object were collected: the object plus all objects reachable only through it. A leaking <code>HashMap</code> may be 48 bytes shallow and hundreds of megabytes retained. Histograms show shallow sizes; heap-dump tools compute retained sizes via the dominator tree. <em>(L07)</em></div>
+        <div class="answer-body">Shallow size is the object itself: its header and fields. Retained size is everything that would be freed if the object were collected. That is the object plus all objects reachable only through it. A leaking <code>HashMap</code> may be 48 bytes shallow and hundreds of megabytes retained. Histograms show shallow sizes. Heap-dump tools work out retained sizes using the dominator tree. <em>(L07)</em></div>
       </details>
 
       <details class="check">
         <summary>What are the risks of taking a heap dump in production?</summary>
-        <div class="answer-body">It pauses the JVM, for seconds on a large heap. It needs disk roughly equal to the live heap and can fill the disk. And it contains every value in memory — passwords, tokens, personal data — so it must be stored securely and deleted afterwards. Prefer histograms first, and dump during low traffic or from an instance removed from the load balancer. <em>(L07)</em></div>
+        <div class="answer-body">It pauses the JVM, for seconds on a large heap. It needs about as much disk as the live heap, and it can fill the disk. And it holds every value in memory: passwords, tokens, personal data. So it must be stored safely and deleted afterwards. Use histograms first. Take the dump during low traffic, or from an instance removed from the load balancer. <em>(L07)</em></div>
       </details>
 
       <details class="check">
         <summary><code>jcmd</code> cannot attach to the JVM. Why might that be?</summary>
-        <div class="answer-body">Attaching works only on the same machine, as the same operating-system user that started the JVM, and inside a container only from within that container (<code>docker exec</code>/<code>kubectl exec</code>). The process may also have exited, or been started with attaching disabled. <em>(L07)</em></div>
+        <div class="answer-body">Attaching only works on the same machine, as the same operating-system user that started the JVM. For a container, it only works from inside that container (<code>docker exec</code>/<code>kubectl exec</code>). The process may also have exited, or been started with attaching turned off. <em>(L07)</em></div>
       </details>
 
       <details class="check">
         <summary>Which <code>jcmd</code> commands would you reach for first?</summary>
-        <div class="answer-body"><code>VM.version</code> and <code>VM.flags</code> (what is running and how); <code>GC.heap_info</code> (generation sizes); <code>Thread.print</code> (threads); <code>GC.class_histogram</code> (what fills the heap); <code>GC.heap_dump</code> (full evidence, carefully); <code>VM.log</code> (switch on GC logging live); <code>JFR.start</code> (low-overhead recording). <code>jcmd &lt;pid&gt; help</code> lists everything. <em>(L07)</em></div>
+        <div class="answer-body">
+          <ul>
+            <li><code>VM.version</code> and <code>VM.flags</code>: what is running, and how.</li>
+            <li><code>GC.heap_info</code>: generation sizes.</li>
+            <li><code>Thread.print</code>: threads.</li>
+            <li><code>GC.class_histogram</code>: what fills the heap.</li>
+            <li><code>GC.heap_dump</code>: full evidence, used carefully.</li>
+            <li><code>VM.log</code>: turn on GC logging live.</li>
+            <li><code>JFR.start</code>: low-cost recording.</li>
+          </ul>
+          <code>jcmd &lt;pid&gt; help</code> lists everything. <em>(L07)</em></div>
       </details>
     </section>
 
@@ -720,7 +752,7 @@
     <section id="s7">
       <h2><span class="sec-num">7</span> Predict-the-output puzzles</h2>
 
-      <p>Interviewers love these, because they test the model rather than the vocabulary. Predict before you open.</p>
+      <p>Interviewers love these, because they test whether you understand how things work, not just the words. Predict before you open.</p>
 
       <h4>Puzzle 1 — references</h4>
       <pre class="code"><code><span class="kw">static void</span> <span class="fn">a</span>(<span class="ty">List</span>&lt;<span class="ty">String</span>&gt; l) { l.<span class="fn">add</span>(<span class="str">"x"</span>); }
@@ -733,7 +765,7 @@
 System.out.<span class="fn">println</span>(list + <span class="str">" "</span> + n);</code></pre>
       <details class="answer">
         <summary>Click to reveal the answer</summary>
-        <p><code>[x] 1</code>. <code>a</code> mutates the shared object through a copied reference. <code>b</code> repoints only its own parameter slot; the new list becomes garbage when <code>b</code> returns. <code>c</code> increments a copy of the number. <em>(L03)</em></p>
+        <p><code>[x] 1</code>. <code>a</code> changes the shared object through a copied reference. <code>b</code> only points its own parameter slot somewhere new. The new list becomes garbage when <code>b</code> returns. <code>c</code> adds one to a copy of the number. <em>(L03)</em></p>
       </details>
 
       <h4>Puzzle 2 — class initialization</h4>
@@ -746,7 +778,7 @@ System.out.<span class="fn">println</span>(C.v);
 System.out.<span class="fn">println</span>(<span class="kw">new</span> <span class="ty">C</span>() != <span class="kw">null</span>);</code></pre>
       <details class="answer">
         <summary>Click to reveal the answer</summary>
-        <p><code>1</code>, then <code>P</code>, <code>2</code>, then <code>C</code>, <code>true</code>. <code>K</code> is a compile-time constant, inlined, so nothing initializes. An array of <code>C</code> initializes nothing. <code>C.v</code> is declared in <code>P</code>, so only <code>P</code> initializes. <code>new C()</code> finally initializes <code>C</code> (P is already done). <em>(L02)</em></p>
+        <p><code>1</code>, then <code>P</code>, <code>2</code>, then <code>C</code>, <code>true</code>. <code>K</code> is a compile-time constant, copied into the caller, so nothing initializes. An array of <code>C</code> initializes nothing. <code>C.v</code> is declared in <code>P</code>, so only <code>P</code> initializes. <code>new C()</code> finally initializes <code>C</code>. (<code>P</code> is already done.) <em>(L02)</em></p>
       </details>
 
       <h4>Puzzle 3 — reachability</h4>
@@ -762,7 +794,7 @@ x = <span class="kw">null</span>; y = <span class="kw">null</span>; pair = <span
 System.out.<span class="fn">println</span>(a);</code></pre>
       <details class="answer">
         <summary>Click to reveal the answer</summary>
-        <p>Garbage: <strong>B</strong> (its array is unreachable), <strong>C and D</strong> (a cycle no root reaches). Reachable: <strong>A</strong> (a live local, used afterwards) and <strong>E</strong> (held by a static field — the shape of a leak). &ldquo;Garbage&rdquo; means eligible; collection happens at the next GC. <em>(L04)</em></p>
+        <p>Garbage: <strong>B</strong> (its array is unreachable), and <strong>C and D</strong> (a cycle that no root reaches). Reachable: <strong>A</strong> (a live local variable, used afterwards) and <strong>E</strong> (held by a static field, which is what a leak looks like). &ldquo;Garbage&rdquo; means able to be collected. The collection itself happens at the next GC. <em>(L04)</em></p>
       </details>
 
       <h4>Puzzle 4 — the stack</h4>
@@ -774,7 +806,7 @@ t.captain = p; p.team = t;
 System.out.<span class="fn">println</span>(t);</code></pre>
       <details class="answer">
         <summary>Click to reveal the answer</summary>
-        <p><code>StackOverflowError</code>. The two <code>toString</code>s call each other forever, each call pushing a frame, until the thread's stack runs out. The trace repeats a two-method cycle — the diagnosis is in the pattern. Raising <code>-Xmx</code> does nothing; the fix is to break the cycle in <code>toString</code>. <em>(L03)</em></p>
+        <p><code>StackOverflowError</code>. The two <code>toString</code>s call each other forever. Each call pushes a frame, until the thread's stack runs out. The trace repeats a loop of two methods, and that pattern tells you the cause. Raising <code>-Xmx</code> does nothing. The fix is to break the loop in <code>toString</code>. <em>(L03)</em></p>
       </details>
 
       <h4>Puzzle 5 — the JIT</h4>
@@ -782,7 +814,7 @@ System.out.<span class="fn">println</span>(t);</code></pre>
 <span class="cmt">// called 10 million times in a hot loop - how many Point objects end up on the heap?</span></code></pre>
       <details class="answer">
         <summary>Click to reveal the answer</summary>
-        <p>Typically: some during warm-up (interpreter and C1 really allocate), then roughly <strong>none</strong>. Once C2 compiles the hot loop with <code>len</code> inlined, escape analysis proves <code>p</code> never escapes and scalar-replaces it. With <code>-XX:-DoEscapeAnalysis</code>, all ten million are allocated. The result is identical either way. <em>(L06)</em></p>
+        <p>Usually: some during warm-up, because the interpreter and C1 really make the objects. After that, roughly <strong>none</strong>. Once C2 compiles the hot loop with <code>len</code> inlined, escape analysis proves <code>p</code> never escapes. So C2 replaces it with plain values. With <code>-XX:-DoEscapeAnalysis</code>, all ten million are made. The result is the same either way. <em>(L06)</em></p>
       </details>
     </section>
 
@@ -817,21 +849,21 @@ System.out.<span class="fn">println</span>(t);</code></pre>
     <section id="s9">
       <h2><span class="sec-num">9</span> How to answer well</h2>
 
-      <p>Strong answers to JVM questions follow the same four-step shape. Practise it on any question in Section 6:</p>
+      <p>Strong answers to JVM questions follow the same four steps. Practise them on any question in Section 6:</p>
 
       <ol>
-        <li><strong>Mechanism.</strong> Say what actually happens: &ldquo;the reference is copied into the callee's frame&rdquo;, &ldquo;C2 proves the object never escapes&rdquo;.</li>
-        <li><strong>Consequence.</strong> Say what that means for the code: &ldquo;so the caller sees mutations but not reassignment&rdquo;.</li>
-        <li><strong>Evidence.</strong> Say how you would check it on a real JVM: <code>javap -c</code>, a GC log line, <code>-XX:+PrintCompilation</code>, two histograms. This is what separates practitioners from people who have read about it.</li>
-        <li><strong>Trade-off.</strong> Say what it costs or where it stops being true: &ldquo;ZGC's short pauses cost throughput&rdquo;, &ldquo;escape analysis only helps hot code&rdquo;.</li>
+        <li><strong>Mechanism.</strong> Say what really happens. For example: &ldquo;the reference is copied into the called method's frame&rdquo;, or &ldquo;C2 proves the object never escapes&rdquo;.</li>
+        <li><strong>Result.</strong> Say what that means for the code. For example: &ldquo;so the caller sees changes to the object, but not reassignment&rdquo;.</li>
+        <li><strong>Evidence.</strong> Say how you would check it on a real JVM: <code>javap -c</code>, a GC log line, <code>-XX:+PrintCompilation</code>, two histograms. This shows you have done it, not just read about it.</li>
+        <li><strong>Trade-off.</strong> Say what it costs, or where it stops being true. For example: &ldquo;ZGC's short pauses cost throughput&rdquo;, or &ldquo;escape analysis only helps hot code&rdquo;.</li>
       </ol>
 
       <div class="callout realworld">
-        <p><strong>Phrases to retire:</strong> &ldquo;Java is pass-by-reference for objects&rdquo; · &ldquo;GC means no memory leaks&rdquo; · &ldquo;<code>System.gc()</code> frees memory&rdquo; · &ldquo;Java is slow because it's interpreted&rdquo; · &ldquo;object creation is expensive&rdquo; · &ldquo;just give it more heap&rdquo;. <strong>Phrases that signal depth:</strong> &ldquo;reachable from a GC root&rdquo; · &ldquo;the heap after full GCs&rdquo; · &ldquo;the max pause, not the average&rdquo; · &ldquo;it depends on whether the object escapes&rdquo; · &ldquo;I'd take two histograms before a heap dump&rdquo; · &ldquo;let me check which collector is actually running&rdquo;.</p>
+        <p><strong>Phrases to stop using:</strong> &ldquo;Java is pass-by-reference for objects&rdquo; · &ldquo;GC means no memory leaks&rdquo; · &ldquo;<code>System.gc()</code> frees memory&rdquo; · &ldquo;Java is slow because it's interpreted&rdquo; · &ldquo;object creation is expensive&rdquo; · &ldquo;just give it more heap&rdquo;. <strong>Phrases that signal depth:</strong> &ldquo;reachable from a GC root&rdquo; · &ldquo;the heap after full GCs&rdquo; · &ldquo;the max pause, not the average&rdquo; · &ldquo;it depends on whether the object escapes&rdquo; · &ldquo;I'd take two histograms before a heap dump&rdquo; · &ldquo;let me check which collector is actually running&rdquo;.</p>
       </div>
 
       <div class="callout note">
-        <p>When you are unsure of a default or a flag name — and HotSpot defaults do change — say so, and say how you would verify it (<code>-XX:+PrintFlagsFinal</code>, <code>jcmd &lt;pid&gt; VM.flags</code>). Interviewers trust &ldquo;I'd verify that on the JDK we run&rdquo; far more than a confidently wrong number.</p>
+        <p>HotSpot defaults do change. So when you are unsure of a default or a flag name, say so. Then say how you would check it (<code>-XX:+PrintFlagsFinal</code>, <code>jcmd &lt;pid&gt; VM.flags</code>). Interviewers trust &ldquo;I'd check that on the JDK we run&rdquo; far more than a wrong number said with confidence.</p>
       </div>
     </section>
 
@@ -867,7 +899,7 @@ System.out.<span class="fn">println</span>(t);</code></pre>
       <div class="nextup">
         <p class="kicker">Keep going</p>
         <h2>Revisit any lesson from the <a href="index.html">course map</a></h2>
-        <p>Every answer above links back to the lesson that explains it in depth, and <code>jvm-explorer</code> can demonstrate almost every one of them on your own machine. Rerunning an experiment the week before an interview is the best revision there is.</p>
+        <p>Every answer above points back to the lesson that explains it in depth. <code>jvm-explorer</code> can show almost every one of them on your own machine. Rerunning an experiment the week before an interview is the best revision there is.</p>
       </div>
     </section>
 

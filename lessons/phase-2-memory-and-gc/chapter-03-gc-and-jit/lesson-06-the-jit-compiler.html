@@ -43,7 +43,7 @@
     <header class="banner">
       <p class="kicker">Core Java · Course 01 · JVM Internals &amp; Memory</p>
       <h1>Lesson 06 — The JIT Compiler</h1>
-      <p class="subtitle">How the JVM finds hot code, compiles it in tiers, pastes small methods into their callers, makes objects that never escape disappear — and throws its own work away when a guess turns out wrong.</p>
+      <p class="subtitle">How the JVM finds hot code and compiles it in tiers. How it pastes small methods into their callers, and makes objects that never leave a method disappear. And how it throws its own work away when a guess turns out wrong.</p>
       <p class="meta">
         <strong>Position:</strong> Lesson 06 of 07 &nbsp;·&nbsp;
         <strong>Prerequisites:</strong> <a href="../../phase-1-foundations/chapter-01-how-java-runs/lesson-01-how-java-runs.html">Lesson 01</a>, <a href="../chapter-02-memory-and-objects/lesson-04-object-lifecycle-and-gc.html">Lesson 04</a> &nbsp;·&nbsp;
@@ -55,24 +55,24 @@
     <section id="s1">
       <h2><span class="sec-num">1</span> The pain</h2>
 
-      <p><a href="../../phase-1-foundations/chapter-01-how-java-runs/lesson-01-how-java-runs.html">Lesson 01</a> timed the same method ten times and watched it drop from about 28 ms to about 2 ms, with a promise that Lesson 06 would explain it properly. Until that promise is kept, three expensive mistakes stay easy to make.</p>
+      <p><a href="../../phase-1-foundations/chapter-01-how-java-runs/lesson-01-how-java-runs.html">Lesson 01</a> timed the same method ten times. It dropped from about 28 ms to about 2 ms. Lesson 01 promised that Lesson 06 would explain why. Until that promise is kept, three costly mistakes stay easy to make.</p>
 
-      <p><strong>The lying benchmark.</strong> A developer times a method once — <code>long start = System.nanoTime(); ...; long end = ...</code> — sees 40 ms, decides it is slow, and spends a day rewriting it. The rewrite measures 35 ms, so it ships. Both numbers measured the <em>interpreter</em>, running code that had not been compiled yet. In production, after a few seconds, both versions run in under a millisecond, and the rewrite may well be the slower of the two.</p>
+      <p><strong>The lying benchmark.</strong> A developer times a method once: <code>long start = System.nanoTime(); ...; long end = ...</code>. They see 40 ms, decide it is slow, and spend a day rewriting it. The rewrite measures 35 ms, so it ships. But both numbers measured the <em>interpreter</em>, running code that had not been compiled yet. In production, after a few seconds, both versions run in under a millisecond. The rewrite may even be the slower one.</p>
 
-      <p><strong>The superstition about <code>new</code>.</strong> &ldquo;Creating objects is expensive, so reuse them.&rdquo; Teams build object pools, keep mutable &ldquo;scratch&rdquo; objects in fields, and make code harder to read and less thread-safe to avoid an allocation — often an allocation the JVM was already deleting by itself. You have seen this optimisation at work without being told: in <a href="../chapter-02-memory-and-objects/lesson-04-object-lifecycle-and-gc.html">Lesson 04</a>, <code>AllocationPatterns</code> had to write every array into a <code>volatile</code> field purely so the JIT could not make the allocations vanish.</p>
+      <p><strong>The myth about <code>new</code>.</strong> &ldquo;Making objects is expensive, so reuse them.&rdquo; Teams build object pools. They keep changeable &ldquo;scratch&rdquo; objects in fields. They make code harder to read and less thread-safe, just to avoid making an object. Often the JVM was already removing that object by itself. You have already seen this at work without being told. In <a href="../chapter-02-memory-and-objects/lesson-04-object-lifecycle-and-gc.html">Lesson 04</a>, <code>AllocationPatterns</code> had to write every array into a <code>volatile</code> field. That was only so the JIT could not make the arrays disappear.</p>
 
-      <p><strong>The mysterious slowdown.</strong> A service is sluggish for the first thirty seconds after every deploy, and the first users pay for it. Worse, it occasionally gets slower <em>mid-run</em> for a few seconds, with no GC activity and no code change. Both are the JIT at work: compiling code while it runs, and sometimes <em>un</em>-compiling it. By the end of this lesson your project will show you each of those events in the JVM's own words, and measure an object disappearing.</p>
+      <p><strong>The mysterious slowdown.</strong> A service is slow for the first thirty seconds after every deploy, and the first users pay for it. Worse, it sometimes gets slower <em>in the middle of a run</em> for a few seconds, with no GC activity and no code change. Both are the JIT at work. It compiles code while it runs, and sometimes it <em>un</em>-compiles it. By the end of this lesson, your project will show you each of those events in the JVM's own words. It will also measure an object disappearing.</p>
     </section>
 
     <!-- ===================== SECTION 2 — ANALOGY ===================== -->
     <section id="s2">
       <h2><span class="sec-num">2</span> Real-world analogy</h2>
 
-      <p>You hire an interpreter to translate a long speech live, into a language the audience understands. At first they translate word by word — slow, but they can start the instant the speaker does.</p>
+      <p>You hire an interpreter to translate a long speech live, into a language the audience understands. At first, they translate word by word. That is slow, but they can start the moment the speaker does.</p>
 
-      <p>After a few minutes they notice the speaker repeats certain phrases constantly. So, during the quieter moments, they write those phrases out fully translated, and from then on simply read them off. They notice the speaker always says &ldquo;as my colleague said&rdquo; and always means Dana, so they start saying &ldquo;as Dana said&rdquo; directly, without stopping to think. They stop jotting down notes that they will throw away a second later. The translation gets faster and smoother — without the speech changing at all.</p>
+      <p>After a few minutes, they notice the speaker repeats some phrases a lot. So, in the quiet moments, they write those phrases out fully translated. From then on, they just read them off. They notice the speaker always says &ldquo;as my colleague said&rdquo;, and always means Dana. So they start saying &ldquo;as Dana said&rdquo; straight away, without stopping to think. They stop writing notes they would throw away a second later. The translation gets faster and smoother, and the speech has not changed at all.</p>
 
-      <p>Then, one day, &ldquo;my colleague&rdquo; means someone else. The interpreter must notice, throw away the shortcut, and go back to translating that phrase carefully, until they have learned the new pattern.</p>
+      <p>Then one day, &ldquo;my colleague&rdquo; means someone else. The interpreter must notice this. They throw away the shortcut and go back to translating that phrase carefully, until they learn the new pattern.</p>
 
       <div class="table-wrap">
         <table>
@@ -90,31 +90,38 @@
         </table>
       </div>
 
-      <p>The key detail: the prepared versions are better than any translation written in advance could be, because they are based on how <em>this</em> speaker actually talks <em>today</em>. That is the JIT's advantage over compiling everything before the program starts.</p>
+      <p>The key detail: the prepared versions are better than any translation written in advance could be. They are based on how <em>this</em> speaker really talks <em>today</em>. That is the JIT's advantage over compiling everything before the program starts.</p>
     </section>
 
     <!-- ===================== SECTION 3 — CONCEPT ===================== -->
     <section id="s3">
       <h2><span class="sec-num">3</span> The concept explained</h2>
 
-      <p><a href="../../phase-1-foundations/chapter-01-how-java-runs/lesson-01-how-java-runs.html">Lesson 01</a> established the basics: the JVM <span class="term" tabindex="0" data-def="The part of the JVM that carries out bytecode one instruction at a time without translating it first. Starts instantly; runs roughly 10–100× slower than native code.">interprets</span> bytecode immediately, counts how often code runs, and compiles the <span class="term" tabindex="0" data-def="A method called (or looped) often enough that the JVM decides compiling it will pay for itself.">hot</span> methods to native code on background threads — first with C1, then with C2. This lesson opens each of those steps up: how &ldquo;hot&rdquo; is decided, what the compilers actually do to your code, and how they recover when they get it wrong.</p>
+      <p><a href="../../phase-1-foundations/chapter-01-how-java-runs/lesson-01-how-java-runs.html">Lesson 01</a> covered the basics. The JVM <span class="term" tabindex="0" data-def="The part of the JVM that carries out bytecode one instruction at a time without translating it first. Starts instantly; runs roughly 10–100× slower than native code.">interprets</span> bytecode at once. It counts how often code runs. It compiles the <span class="term" tabindex="0" data-def="A method called (or looped) often enough that the JVM decides compiling it will pay for itself.">hot</span> methods to native code on background threads, first with C1, then with C2. This lesson opens up each of those steps. How is &ldquo;hot&rdquo; decided? What do the compilers actually do to your code? And how do they recover when they get it wrong?</p>
 
       <h3>3.1 Profiling: what the JVM learns before it compiles</h3>
 
-      <p>The JVM's compilers can do something no compiler that runs <em>before</em> the program can: base their decisions on what the program actually did. While code runs, the JVM collects facts about it — how many times each method was called, how many times each loop went round, which way each <code>if</code> went, and which classes actually arrived at each method call made through an interface or a superclass. Collecting facts about running code to guide later decisions is called <strong>profiling</strong>, and the facts collected are the <strong>profile</strong>.</p>
+      <p>The JVM's compilers can do something that no compiler running <em>before</em> the program can do. They can base their decisions on what the program actually did. While code runs, the JVM collects facts about it:</p>
+      <ul>
+        <li>how many times each method was called,</li>
+        <li>how many times each loop went round,</li>
+        <li>which way each <code>if</code> went, and</li>
+        <li>which classes actually arrived at each method call made through an interface or a superclass.</li>
+      </ul>
+      <p>Collecting facts about running code to guide later decisions is called <strong>profiling</strong>. The facts collected are the <strong>profile</strong>.</p>
 
-      <p>A profile answers questions like &ldquo;this <code>if</code> has been false 2 million times and true never&rdquo; or &ldquo;every object that ever reached this <code>shape.area()</code> call was a <code>Square</code>&rdquo;. As you will see, the best optimisations are bets placed on answers like these.</p>
+      <p>A profile answers questions like &ldquo;this <code>if</code> has been false 2 million times and true never&rdquo;. Or &ldquo;every object that ever reached this <code>shape.area()</code> call was a <code>Square</code>&rdquo;. As you will see, the best optimisations are bets placed on answers like these.</p>
 
       <h3>3.2 Finding hot code: counters, thresholds and tiers</h3>
 
-      <p>Every method has two counters: one for <em>calls</em> (invocations) and one for <em>loop iterations</em>. A loop iteration is counted each time execution jumps back to the top of a loop, and that backward jump is called a <strong>back-edge</strong> (you saw it as the <code>goto</code> at the end of <code>sumTo</code>'s bytecode in Lesson 01). When the counters cross thresholds, the method moves up a level. HotSpot names the levels by number, and each level is called a <strong>tier</strong>:</p>
+      <p>Every method has two counters. One counts <em>calls</em> (also called invocations). The other counts <em>loop iterations</em>. A loop iteration is counted each time the code jumps back to the top of a loop. That backward jump is called a <strong>back-edge</strong>. (You saw it as the <code>goto</code> at the end of <code>sumTo</code>'s bytecode in Lesson 01.) When the counters pass certain limits, the method moves up a level. HotSpot numbers the levels. Each level is called a <strong>tier</strong>:</p>
 
       <div class="table-wrap">
         <table>
           <thead><tr><th>Tier</th><th>Who runs the code</th><th>Profiling?</th><th>When a method usually gets here</th></tr></thead>
           <tbody>
             <tr><td><strong>0</strong></td><td>the interpreter</td><td>yes (basic counts)</td><td>always, at first</td></tr>
-            <tr><td><strong>1</strong></td><td>C1, full optimisation</td><td>no</td><td>trivial methods (getters) — C2 could not do better, so there is no point profiling them</td></tr>
+            <tr><td><strong>1</strong></td><td>C1, full optimisation</td><td>no</td><td>very simple methods (getters). C2 could not do better, so there is no point profiling them.</td></tr>
             <tr><td><strong>2</strong></td><td>C1</td><td>light</td><td>when C2 is too busy to take the method yet</td></tr>
             <tr><td><strong>3</strong></td><td>C1</td><td><strong>full</strong></td><td>the usual first compile — roughly after a few hundred calls</td></tr>
             <tr><td><strong>4</strong></td><td>C2, using the profile</td><td>no</td><td>the hot methods — roughly after a few thousand calls</td></tr>
@@ -122,7 +129,7 @@
         </table>
       </div>
 
-      <p>The typical journey is <strong>0 → 3 → 4</strong>. The exact thresholds (in HotSpot, about 200 calls for tier 3 and about 5,000 for tier 4, combined with loop counts) are tuning details that differ by version. To see your JVM's real values, run <code>java -XX:+PrintFlagsFinal -version</code> and look for names starting with <code>Tier3</code> and <code>Tier4</code> — to verify, not to memorise. The whole multi-level arrangement is called <strong>tiered compilation</strong>.</p>
+      <p>The usual journey is <strong>0 → 3 → 4</strong>. In HotSpot, the limits are about 200 calls for tier 3 and about 5,000 for tier 4, combined with loop counts. These are tuning details that change between versions. To see your JVM's real values, run <code>java -XX:+PrintFlagsFinal -version</code> and look for names starting with <code>Tier3</code> and <code>Tier4</code>. Check them, but do not memorise them. This whole set of levels is called <strong>tiered compilation</strong>.</p>
 
       <figure class="fig">
         <svg viewBox="0 0 720 260" role="img" aria-label="The tier ladder. A method starts at tier 0 in the interpreter. After a few hundred calls it is compiled at tier 3 by C1 with full profiling, and after a few thousand more at tier 4 by C2. Trivial methods go from tier 0 straight to tier 1. If an assumption C2 relied on breaks, the method is deoptimized back to tier 0 and later climbs again.">
@@ -163,46 +170,58 @@
           <path class="fig-arrow" d="M578,78 C578,24 84,24 84,76" marker-end="url(#l6ah)"/>
           <text class="fig-small" x="330" y="20" text-anchor="middle">deoptimization: an assumption broke — back to the interpreter, climb again later</text>
         </svg>
-        <figcaption><strong>The usual climb is 0 → 3 → 4.</strong> Grey = interpreter; teal = C1 code (quick to produce); amber = C2 code (slow to produce, fastest to run). Tier 3 exists to gather the profile C2 needs. The long arrow back is deoptimization (3.6): compiled code can always fall back to the interpreter, and that safety net is what lets C2 take risks.</figcaption>
+        <figcaption><strong>The usual climb is 0 → 3 → 4.</strong> Grey = interpreter. Teal = C1 code (quick to make). Amber = C2 code (slow to make, fastest to run). Tier 3 exists to gather the profile that C2 needs. The long arrow back is deoptimization (3.6). Compiled code can always fall back to the interpreter. That safety net is what lets C2 take risks.</figcaption>
       </figure>
 
       <h3>3.3 On-stack replacement: compiling a loop that is already running</h3>
 
-      <p><strong>What goes wrong without it.</strong> Picture a program whose <code>main</code> method contains one enormous loop — load a file, process 50 million records, exit. <code>main</code> is called exactly once. If the JVM only compiled methods that were <em>called</em> often, the call counter would never move past 1, and the whole run would be interpreted, perhaps fifty times slower than necessary. Compiling the method for its <em>next</em> call would not help either, because there is no next call.</p>
+      <p><strong>What goes wrong without it.</strong> Picture a program whose <code>main</code> method holds one huge loop. It loads a file, processes 50 million records, and exits. <code>main</code> is called exactly once. Say the JVM only compiled methods that were <em>called</em> often. The call counter would never get past 1. The whole run would be interpreted, maybe fifty times slower than it needs to be. Compiling the method for its <em>next</em> call would not help either, because there is no next call.</p>
 
-      <p>The back-edge counter catches it. When a loop has gone round enough times, the JVM compiles a special version of the method that starts <em>in the middle of the loop</em>. At the next back-edge, the interpreter transfers the loop's current state — the values in the local variable slots from Lesson 01 — into that compiled code, and execution continues there, mid-loop. Replacing a running interpreted frame on the stack with a compiled one is called <strong>on-stack replacement</strong> (OSR). In the compilation log it is marked with <code>%</code>, and the line names the loop's position in the bytecode, such as <code>@ 4</code>.</p>
+      <p>The back-edge counter catches this case. When a loop has gone round enough times, the JVM compiles a special version of the method. This version starts <em>in the middle of the loop</em>. At the next back-edge, the interpreter moves the loop's current state into that compiled code. The state is the values in the local variable slots from Lesson 01. Then the code carries on in the compiled version, in the middle of the loop. Swapping a running interpreted frame on the stack for a compiled one is called <strong>on-stack replacement</strong> (OSR). In the compilation log, it is marked with <code>%</code>. The line also names the loop's position in the bytecode, such as <code>@ 4</code>.</p>
 
       <h3>3.4 Inlining: the optimisation that unlocks the others</h3>
 
-      <p><strong>What goes wrong without it.</strong> Good Java code is full of tiny methods: getters, <code>isEmpty()</code>, small helpers. Every call has a fixed cost — save the caller's state, jump, set up a new frame, jump back. Worse, a call is a wall: when C2 compiles a method, it cannot see what a called method does, so it must assume the worst about it. That makes the caller far harder to optimise. Without a fix, writing small, readable methods would carry a real speed penalty, and people would hand-merge methods into unreadable ones (some still do, needlessly).</p>
+      <p><strong>What goes wrong without it.</strong> Good Java code is full of tiny methods: getters, <code>isEmpty()</code>, small helpers. Every call has a fixed cost. The JVM saves the caller's state, jumps, sets up a new frame, and jumps back. Worse, a call is a wall. When C2 compiles a method, it cannot see what a called method does. So it must assume the worst about it. That makes the caller much harder to optimise. Without a fix, small, readable methods would make code slower. People would merge methods by hand into unreadable ones. (Some still do, for no reason.)</p>
 
-      <p>The fix: the compiler copies the body of the called method directly into the caller, as if you had written it out by hand. The call disappears. This is called <strong>inlining</strong>. HotSpot readily inlines small methods (roughly up to 35 bytes of bytecode) and, for hot call sites, much larger ones (roughly up to 325 bytes) — thresholds to verify with <code>-XX:+PrintFlagsFinal</code>, not to design around. So in Java, <strong>writing small methods is free</strong> once the code is hot.</p>
+      <p>The fix: the compiler copies the body of the called method straight into the caller, as if you had written it out by hand. The call disappears. This is called <strong>inlining</strong>. HotSpot happily inlines small methods, roughly up to 35 bytes of bytecode. For hot call sites, it inlines much larger ones, roughly up to 325 bytes. (Check these limits with <code>-XX:+PrintFlagsFinal</code>. Do not design your code around them.) So in Java, <strong>small methods cost nothing</strong> once the code is hot.</p>
 
-      <p>Removing the call is the small win. The big win is what inlining <em>exposes</em>. Once the callee's body sits inside the caller, C2 can see across the old boundary: a value computed in one place and tested in the other can be worked out at compile time (<em>constant folding</em>), code that can never run can be deleted, and objects created in one place and used in the other become candidates for escape analysis (3.5). This is why inlining is often called the mother of all optimisations.</p>
+      <p>Removing the call is the small win. The big win is what inlining <em>reveals</em>. Once the called method's body sits inside the caller, C2 can see across the old wall. That allows more speed-ups:</p>
+      <ul>
+        <li>A value worked out in one place and tested in the other can be worked out at compile time. This is called <em>constant folding</em>.</li>
+        <li>Code that can never run can be deleted.</li>
+        <li>Objects made in one place and used in the other can be checked by escape analysis (3.5).</li>
+      </ul>
+      <p>This is why people often call inlining the mother of all optimisations.</p>
 
-      <p><strong>Inlining through interfaces.</strong> A call like <code>shape.area()</code> could reach <code>Square.area()</code> or <code>Circle.area()</code>, so which body should be pasted in? This is where the profile pays off. HotSpot recorded which classes actually arrived at this exact call. If only one ever did, the call site is <strong>monomorphic</strong>, and C2 inlines that class's method behind a cheap check (&ldquo;is it still a <code>Square</code>?&rdquo;). With two it is <strong>bimorphic</strong>, and both bodies are inlined behind checks. With three or more it is <strong>megamorphic</strong>: C2 gives up inlining and makes an ordinary virtual call. Better still, if only one class implementing the interface has even been <em>loaded</em>, C2 can skip the check entirely, because no other class exists yet. That decision, based on the classes loaded so far, is called <strong>class hierarchy analysis</strong>. It is a bet — and Section 3.6 is about what happens when a new class is loaded and the bet is lost.</p>
+      <p><strong>Inlining through interfaces.</strong> A call like <code>shape.area()</code> could reach <code>Square.area()</code> or <code>Circle.area()</code>. So which body should be pasted in? This is where the profile pays off. HotSpot recorded which classes actually arrived at this exact call.</p>
+      <ul>
+        <li>If only one class ever did, the call site is <strong>monomorphic</strong>. C2 inlines that class's method behind a cheap check (&ldquo;is it still a <code>Square</code>?&rdquo;).</li>
+        <li>With two classes, it is <strong>bimorphic</strong>. Both bodies are inlined behind checks.</li>
+        <li>With three or more, it is <strong>megamorphic</strong>. C2 gives up on inlining and makes a normal virtual call.</li>
+      </ul>
+      <p>It gets even better. Say only one class that implements the interface has even been <em>loaded</em>. Then C2 can skip the check completely, because no other class exists yet. This decision, based on the classes loaded so far, is called <strong>class hierarchy analysis</strong>. It is a bet. Section 3.6 is about what happens when a new class is loaded and the bet is lost.</p>
 
       <details class="check">
         <summary>Is it worth manually copying a small helper method into its callers to &ldquo;save the call&rdquo;?</summary>
-        <div class="answer-body">No. Once the code is hot, C2 inlines small methods by itself, so the call is already gone — and the manual copy just makes the code harder to read and maintain. The only code where the call costs anything is cold code, which by definition does not run often enough to matter.</div>
+        <div class="answer-body">No. Once the code is hot, C2 inlines small methods by itself, so the call is already gone. The hand-made copy just makes the code harder to read and maintain. The only code where the call costs anything is cold code. Cold code does not run often enough to matter.</div>
       </details>
 
       <h3>3.5 Escape analysis: objects that never need to exist</h3>
 
-      <p><strong>What goes wrong when you optimise allocation by hand.</strong> Consider:</p>
+      <p><strong>What goes wrong when you try to avoid making objects by hand.</strong> Look at this:</p>
 
       <pre class="code"><code><span class="kw">int</span> <span class="fn">distanceSquared</span>(<span class="kw">int</span> x1, <span class="kw">int</span> y1, <span class="kw">int</span> x2, <span class="kw">int</span> y2) {
     <span class="ty">Delta</span> d = <span class="kw">new</span> <span class="ty">Delta</span>(x2 - x1, y2 - y1);   <span class="cmt">// a new object on every call...</span>
     <span class="kw">return</span> d.dx() * d.dx() + d.dy() * d.dy();
 }</code></pre>
 
-      <p>The instinct is to &ldquo;fix&rdquo; this by keeping one reusable <code>Delta</code> in a field and overwriting it each call. That makes the method unsafe to call from two threads at once (Lesson 03: fields are shared, locals are not), uglier, and — as you are about to measure — probably no faster at all.</p>
+      <p>The first idea is to &ldquo;fix&rdquo; this by keeping one reusable <code>Delta</code> in a field and overwriting it on each call. But that makes the method unsafe to call from two threads at once (Lesson 03: fields are shared, locals are not). It makes the code uglier. And, as you are about to measure, it is probably no faster at all.</p>
 
-      <p>Here is why. An object <strong>escapes</strong> a method if some code outside that method could ever get hold of it. That happens if the object is returned, stored in a field or a static, passed to a method that was not inlined, or thrown. <code>d</code> above does none of these: it is born, read, and abandoned inside one call. C2 checks every allocation in the code it compiles — after inlining, which is why inlining matters so much here — and works out whether the object can escape. This check is called <strong>escape analysis</strong>. When the answer is &ldquo;no&rdquo;, C2 can:</p>
+      <p>Here is why. An object <strong>escapes</strong> a method if any code outside that method could ever get hold of it. That happens if the object is returned, stored in a field or a static, passed to a method that was not inlined, or thrown. <code>d</code> above does none of these. It is made, read, and dropped inside one call. C2 checks every object that the code it compiles makes. It works out whether each object can escape. It does this after inlining, which is why inlining matters so much here. This check is called <strong>escape analysis</strong>. When the answer is &ldquo;no&rdquo;, C2 can:</p>
 
       <ul>
-        <li><strong>Not create the object at all.</strong> Its fields become ordinary local values, held in CPU registers or the frame. <code>d.dx()</code> becomes simply &ldquo;the value <code>x2 - x1</code>&rdquo;. Breaking an object into its separate fields like this is called <strong>scalar replacement</strong>. No allocation means no garbage, and no work for the collector of Lessons 04 and 05.</li>
-        <li><strong>Remove locks on it.</strong> A <code>synchronized</code> block on an object no other thread can ever see protects nothing, so the lock is dropped. This is called <strong>lock elision</strong>.</li>
+        <li><strong>Not make the object at all.</strong> Its fields become ordinary local values, held in CPU registers or the frame. <code>d.dx()</code> becomes just &ldquo;the value <code>x2 - x1</code>&rdquo;. Breaking an object into its separate fields like this is called <strong>scalar replacement</strong>. No object means no garbage, and no work for the collector from Lessons 04 and 05.</li>
+        <li><strong>Remove locks on it.</strong> A <code>synchronized</code> block on an object that no other thread can ever see protects nothing. So the lock is dropped. This is called <strong>lock elision</strong>.</li>
       </ul>
 
       <figure class="fig">
@@ -236,45 +255,70 @@
           <text class="fig-small" x="550" y="202" text-anchor="middle">(nothing allocated)</text>
           <text class="fig-small" x="550" y="242" text-anchor="middle">same result, no object, no garbage</text>
         </svg>
-        <figcaption><strong>The same source, two very different runs.</strong> Amber = the code as it executes; teal = a heap with an object in it; plain = a heap that never sees one. The program's result is identical either way — escape analysis never changes what your code computes, only whether an object physically exists. The project measures this: about 24 bytes per call cold, close to 0 hot.</figcaption>
+        <figcaption><strong>The same source, two very different runs.</strong> Amber = the code as it runs. Teal = a heap with an object in it. Plain = a heap that never sees one. The program's result is the same either way. Escape analysis never changes what your code works out. It only changes whether an object really exists. The project measures this: about 24 bytes per call when cold, close to 0 when hot.</figcaption>
       </figure>
 
       <div class="callout note">
-        <p>Honest limits. Only C2 does escape analysis, so it only helps hot code. It is all-or-nothing per allocation, and anything that escapes even on a rare path, or whose method was too big to inline, keeps its allocation. The analysis is also conservative: it can miss objects that a human can see do not escape. So the rule is not &ldquo;allocation is free&rdquo;, it is &ldquo;<strong>short-lived, local allocation is far cheaper than intuition says</strong> — measure before you complicate code to avoid it.&rdquo; Lesson 03's footnote said objects might not reach the heap; this is that footnote, paid off.</p>
+        <p>Honest limits:</p>
+        <ul>
+          <li>Only C2 does escape analysis, so it only helps hot code.</li>
+          <li>It is all-or-nothing for each object. If an object escapes even on a rare path, it is still made. The same goes for objects made in a method that was too big to inline.</li>
+          <li>The analysis is careful, so it can miss objects that a human can see do not escape.</li>
+        </ul>
+        <p>So the rule is not &ldquo;making objects is free&rdquo;. It is: &ldquo;<strong>making short-lived, local objects is much cheaper than you would guess.</strong> Measure before you make code more complicated to avoid it.&rdquo; Lesson 03's footnote said objects might not reach the heap. This is that footnote, explained.</p>
       </div>
 
       <h3>3.6 Speculation and deoptimization: betting, and losing</h3>
 
-      <p>C2's best optimisations are bets based on the profile. It bets that a branch that has never been taken never will be, and leaves that path out of the compiled code. It bets that a call site that has only ever seen <code>Square</code> will only ever see <code>Square</code>. It bets, through class hierarchy analysis, that no other implementation will ever be loaded. Optimising on the assumption that past behaviour continues is called <strong>speculative optimisation</strong>. Without it, the compiled code would have to handle every theoretical possibility and would be much slower.</p>
+      <p>C2's best optimisations are bets based on the profile.</p>
+      <ul>
+        <li>It bets that a branch that has never been taken never will be. So it leaves that path out of the compiled code.</li>
+        <li>It bets that a call site that has only ever seen <code>Square</code> will only ever see <code>Square</code>.</li>
+        <li>Through class hierarchy analysis, it bets that no other implementation will ever be loaded.</li>
+      </ul>
+      <p>Optimising on the guess that the past will continue is called <strong>speculative optimisation</strong>. Without it, the compiled code would have to handle every possible case, and it would be much slower.</p>
 
-      <p>But a bet can be lost. Every speculation is protected by a check, or recorded as a dependency (&ldquo;this code assumes <code>Square</code> is the only <code>Shape</code>&rdquo;). When a check fails, or when loading a new class breaks a recorded dependency, the JVM does something remarkable:</p>
+      <p>But a bet can be lost. Every guess is protected by a check, or written down as a dependency (&ldquo;this code assumes <code>Square</code> is the only <code>Shape</code>&rdquo;). A check may fail. Or loading a new class may break a recorded dependency. Then the JVM does something remarkable:</p>
 
       <ol>
-        <li>It stops using the compiled code. New calls are no longer allowed to enter it — in the log, the version is <strong>made not entrant</strong>.</li>
-        <li>Any thread currently running inside that compiled code has its frame converted back into an ordinary interpreter frame, values and all, and carries on in the interpreter from exactly the same point. Your program never notices, apart from a temporary slowdown.</li>
-        <li>The method climbs the tiers again, gathers a fresh profile that now includes the new case, and is recompiled.</li>
+        <li>It stops using the compiled code. New calls are no longer allowed to enter it. In the log, this version is <strong>made not entrant</strong>.</li>
+        <li>Some threads may be running inside that compiled code right now. Each one has its frame turned back into a normal interpreter frame, values and all. It carries on in the interpreter from exactly the same point. Your program never notices, except for a short slowdown.</li>
+        <li>The method climbs the tiers again. It gathers a fresh profile that now includes the new case, and it is compiled again.</li>
       </ol>
 
-      <p>Throwing away compiled code and returning to the interpreter like this is called <strong>deoptimization</strong>. It is the safety net that makes speculation affordable. It also explains the mid-run slowdown from Section 1: a rare code path or a newly loaded plugin class can make a hot method fall back to the interpreter for a moment. A program that keeps flipping between behaviours can deoptimize the same method over and over, which is worth knowing exists and rare in practice.</p>
+      <p>Throwing away compiled code and going back to the interpreter like this is called <strong>deoptimization</strong>. It is the safety net that makes guessing affordable. It also explains the slowdown in the middle of a run from Section 1. A rare piece of code, or a newly loaded plugin class, can make a hot method fall back to the interpreter for a moment. A program that keeps switching between behaviours can deoptimize the same method again and again. That is worth knowing about, but it is rare in practice.</p>
 
       <div class="callout warning">
-        <p><strong>&ldquo;Made not entrant&rdquo; does not always mean deoptimization.</strong> When a method reaches tier 4, the JVM retires the old tier 3 version, which is logged with the very same words. That is simple <em>replacement</em> — healthy and expected. A <strong>tier 4</strong> version being made not entrant is the real deoptimization. The project's report counts the two separately for exactly this reason.</p>
+        <p><strong>&ldquo;Made not entrant&rdquo; does not always mean deoptimization.</strong> When a method reaches tier 4, the JVM retires the old tier 3 version. The log uses the very same words for that. It is just a <em>replacement</em>, which is healthy and expected. A <strong>tier 4</strong> version being made not entrant is the real deoptimization. That is exactly why the project's report counts the two separately.</p>
       </div>
 
       <details class="check">
         <summary>A program runs for an hour with only <code>Square</code> objects, and C2 has compiled <code>totalArea</code> assuming every <code>Shape</code> is a <code>Square</code>. Then a plugin creates the first <code>Circle</code>. Can <code>totalArea</code> now compute the wrong answer?</summary>
-        <div class="answer-body">No — never. Loading <code>Circle</code> breaks the recorded assumption, so before any <code>Circle</code> can reach that code, the C2 version is made not entrant, and any thread inside it is moved back to the interpreter. The JIT's absolute promise is that optimisations never change what your program computes; deoptimization is how it keeps that promise when its guesses go wrong.</div>
+        <div class="answer-body">No, never. Loading <code>Circle</code> breaks the recorded guess. So before any <code>Circle</code> can reach that code, the C2 version is made not entrant. Any thread inside it is moved back to the interpreter. The JIT's firm promise is that its optimisations never change what your program works out. Deoptimization is how it keeps that promise when its guesses go wrong.</div>
       </details>
 
-      <h3>3.7 Warm-up, demonstrated — and measured honestly</h3>
+      <h3>3.7 Warm-up, shown — and measured honestly</h3>
 
-      <p>Now the whole of Lesson 01's warm-up table can be explained, step by step. The first batch was slow for four overlapping reasons: classes were still being loaded and initialized (Lesson 02); the code ran in the interpreter (tier 0); then, for a while, in C1 code that was still collecting a profile (tier 3); and C1 and C2 were compiling on background threads, taking CPU time. Only after C2 installed its version did the method run at full speed — and if the loop had been running all along inside one call, OSR switched it over mid-run. That settling-in period is <span class="term" tabindex="0" data-def="The settling-in period at the start of a run while interpretation gives way to compiled code. Any Java timing taken without warm-up is meaningless.">warm-up</span>.</p>
+      <p>Now we can explain all of Lesson 01's warm-up table, step by step. The first batch was slow for four reasons that overlapped:</p>
+      <ol>
+        <li>Classes were still being loaded and initialized (Lesson 02).</li>
+        <li>The code ran in the interpreter (tier 0).</li>
+        <li>Then, for a while, it ran in C1 code that was still collecting a profile (tier 3).</li>
+        <li>C1 and C2 were compiling on background threads, which took CPU time.</li>
+      </ol>
+      <p>The method only ran at full speed after C2 installed its version. If the loop had been running all along inside one call, OSR switched it over in the middle of the run. That settling-in time is <span class="term" tabindex="0" data-def="The settling-in period at the start of a run while interpretation gives way to compiled code. Any Java timing taken without warm-up is meaningless.">warm-up</span>.</p>
 
-      <p><strong>What goes wrong with a stopwatch.</strong> A naive timing loop measures some unknown mix of all those phases. It can be fooled by the JIT deleting the work entirely, because the result is never used (that is why every experiment in this project writes its results to a <code>sink</code>). And it differs from run to run depending on what was compiled when. The standard cure is <strong>JMH</strong> (the Java Microbenchmark Harness, part of OpenJDK, met in Lesson 01). It runs warm-up iterations before measuring, starts fresh JVMs so earlier experiments cannot pollute the profile, and provides a &ldquo;blackhole&rdquo; that consumes results so the JIT cannot delete the work. This project does not use JMH, because it is a separate build setup; the rule it teaches still applies to every timing you ever take.</p>
+      <p><strong>What goes wrong with a stopwatch.</strong> A simple timing loop measures some unknown mix of all those stages. The JIT can fool it by deleting the work completely, if the result is never used. (That is why every experiment in this project writes its results to a <code>sink</code>.) And it gives different numbers on each run, depending on what was compiled when. The standard cure is <strong>JMH</strong> (the Java Microbenchmark Harness, part of OpenJDK, met in Lesson 01). JMH does three things:</p>
+      <ul>
+        <li>It runs warm-up rounds before it measures.</li>
+        <li>It starts fresh JVMs, so earlier experiments cannot spoil the profile.</li>
+        <li>It gives you a &ldquo;blackhole&rdquo; that takes in results, so the JIT cannot delete the work.</li>
+      </ul>
+      <p>This project does not use JMH, because it needs a separate build setup. But the rule it teaches applies to every timing you ever take.</p>
 
       <h3>3.8 Seeing the JIT at work</h3>
 
-      <p>HotSpot will narrate its compilations if you ask. <code>-XX:+PrintCompilation</code> prints one line every time a method is compiled or a compiled version is retired:</p>
+      <p>HotSpot will describe its compilations if you ask. <code>-XX:+PrintCompilation</code> prints one line every time a method is compiled, or a compiled version is retired:</p>
 
       <pre class="ascii"><code>    118   35 %     3       com.corejava.jvm.jit.JitSubjects::longRunningLoop @ 4 (27 bytes)
     ^^^   ^^ ^     ^       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ ^^^ ^^^^^^^^^^
@@ -289,7 +333,7 @@
      +----------------------------------------------------------------------------------- milliseconds since JVM start
 (a retirement repeats the line, with "made not entrant" at the end)</code></pre>
 
-      <p>The column layout is a HotSpot implementation detail, not a specified format, so treat it as something to verify on your JDK. A few other switches are worth knowing, for experiments only:</p>
+      <p>The column layout is a HotSpot detail, not an official format. So check it on your JDK. A few other switches are worth knowing, for experiments only:</p>
 
       <div class="table-wrap">
         <table>
@@ -305,25 +349,32 @@
         </table>
       </div>
 
-      <p>One last region from Lesson 03 belongs here. Compiled machine code lives in the <strong>code cache</strong>. If it ever fills, HotSpot prints <code>CodeCache is full. Compiler has been disabled</code>, stops compiling, and keeps running whatever is not yet compiled in the interpreter — correctly, but slowly. That is rare with modern defaults, and it is the explanation when a long-running application gradually gets slower with no GC problem in sight.</p>
+      <p>One last memory area from Lesson 03 belongs here. Compiled machine code lives in the <strong>code cache</strong>. If it ever fills up, HotSpot prints <code>CodeCache is full. Compiler has been disabled</code>. It stops compiling. Anything not yet compiled keeps running in the interpreter: correctly, but slowly. That is rare with modern default settings. It is the answer when a long-running application slowly gets slower with no GC problem in sight.</p>
     </section>
 
     <!-- ===================== SECTION 4 — APPLIED ===================== -->
     <section id="s4">
       <h2><span class="sec-num">4</span> Applied to jvm-explorer</h2>
 
-      <p>The project gains a <code>jit</code> package. It holds methods built to be compiled, an allocation meter that can see escape analysis at work, a reader for <code>-XX:+PrintCompilation</code> output that tells one method's story, and the JIT's own status. An experiment runs five phases designed to make each behaviour appear in the log.</p>
+      <p>The project gets a <code>jit</code> package. It holds:</p>
+      <ul>
+        <li>methods built to be compiled,</li>
+        <li>an allocation meter that can see escape analysis at work,</li>
+        <li>a reader for <code>-XX:+PrintCompilation</code> output that tells one method's story, and</li>
+        <li>the JIT's own status.</li>
+      </ul>
+      <p>An experiment runs five phases. Each phase is built to make one JIT behaviour appear in the log.</p>
 
       <h3>4.1 What happens, step by step</h3>
 
       <ol>
-        <li>You run <code>JitExperiment</code> with <code>-XX:+PrintCompilation</code>, sending everything to <code>jit.log</code>. The JVM's compilation lines and the program's own <code>=== PHASE ===</code> markers land in the same file, in time order.</li>
-        <li><strong>Phase 1</strong> calls <code>sumOfSquares(10)</code> 100 times: too few calls and loop iterations to compile it, so no line for it appears.</li>
-        <li><strong>Phase 2</strong> calls it 20,000 times. Its counters cross the tier 3 threshold, so C1 compiles it, and later the tier 4 threshold, so C2 compiles it using the profile. Then the tier 3 version is made not entrant: a replacement.</li>
-        <li><strong>Phase 3</strong> calls <code>longRunningLoop</code> once with a 50-million-iteration loop. The back-edge counter triggers an OSR compilation: a line with <code>%</code> and <code>@ position</code>.</li>
-        <li><strong>Phase 4</strong> measures the bytes allocated per <code>distanceSquared</code> call, in eight batches of 200,000, using HotSpot's per-thread allocation counter. Early batches run interpreted or in C1, so each call really allocates its roughly 24-byte <code>Delta</code>. Once C2 has compiled the loop, with <code>distanceSquared</code> inlined into it, escape analysis proves <code>Delta</code> never escapes and stops creating it.</li>
-        <li><strong>Phase 5</strong> calls <code>totalArea</code> with only <code>Square</code>s until C2 compiles it on the assumption that every <code>Shape</code> is a <code>Square</code>. <strong>Phase 5b</strong> creates the first <code>Circle</code>, which loads the <code>Circle</code> class and breaks that assumption, so the tier 4 version of <code>totalArea</code> is made not entrant (a real deoptimization), and the method is compiled again.</li>
-        <li><code>CompilationLogTool jit.log JitSubjects</code> reads the file — even if Windows PowerShell wrote it as UTF-16 — parses every compilation line, prints a report, and then tells the story of every <code>JitSubjects</code> method with the phase markers kept in place.</li>
+        <li>You run <code>JitExperiment</code> with <code>-XX:+PrintCompilation</code>, and send everything to <code>jit.log</code>. The JVM's compilation lines and the program's own <code>=== PHASE ===</code> markers land in the same file, in time order.</li>
+        <li><strong>Phase 1</strong> calls <code>sumOfSquares(10)</code> 100 times. That is too few calls and loop rounds to compile it. So no line for it appears.</li>
+        <li><strong>Phase 2</strong> calls it 20,000 times. Its counters pass the tier 3 limit, so C1 compiles it. Later they pass the tier 4 limit, so C2 compiles it using the profile. Then the tier 3 version is made not entrant. That is a replacement.</li>
+        <li><strong>Phase 3</strong> calls <code>longRunningLoop</code> once, with a loop of 50 million rounds. The back-edge counter starts an OSR compilation. You get a line with <code>%</code> and <code>@ position</code>.</li>
+        <li><strong>Phase 4</strong> measures the bytes allocated per <code>distanceSquared</code> call, in eight batches of 200,000. It uses HotSpot's per-thread allocation counter. Early batches run in the interpreter or in C1, so each call really makes its roughly 24-byte <code>Delta</code>. Then C2 compiles the loop, with <code>distanceSquared</code> inlined into it. Escape analysis proves <code>Delta</code> never escapes, and stops making it.</li>
+        <li><strong>Phase 5</strong> calls <code>totalArea</code> with only <code>Square</code>s, until C2 compiles it on the guess that every <code>Shape</code> is a <code>Square</code>. <strong>Phase 5b</strong> makes the first <code>Circle</code>. That loads the <code>Circle</code> class and breaks the guess. So the tier 4 version of <code>totalArea</code> is made not entrant (a real deoptimization), and the method is compiled again.</li>
+        <li><code>CompilationLogTool jit.log JitSubjects</code> reads the file, even if Windows PowerShell wrote it as UTF-16. It parses every compilation line and prints a report. Then it tells the story of every <code>JitSubjects</code> method, with the phase markers kept in place.</li>
       </ol>
 
       <h3>4.2 The files</h3>
@@ -361,7 +412,7 @@
 <span class="cmt">// a volatile sink, so a "0 bytes" reading cannot be caused by the JIT deleting the loop.</span>
 <span class="kw">public static</span> <span class="ty">OptionalDouble</span> <span class="fn">bytesPerCall</span>(<span class="kw">int</span> calls, <span class="ty">IntToLongFunction</span> loop) { <span class="cmt">/* … */</span> }</code></pre>
 
-      <p>The syntax <code>x instanceof SomeType name</code> checks the type and, if it matches, gives you the converted variable under that name in one step. It is called <strong>pattern matching for <code>instanceof</code></strong> (Java 16 and later). Notice the meter is careful about the one thing that could fake the result: if the JIT deleted the whole loop, the meter would also read 0 bytes — for the wrong reason. Writing the result to a <code>volatile</code> field prevents that.</p>
+      <p>The syntax <code>x instanceof SomeType name</code> checks the type. If it matches, it also gives you the converted variable under that name, in one step. This is called <strong>pattern matching for <code>instanceof</code></strong> (Java 16 and later). Notice that the meter guards against the one thing that could fake the result. If the JIT deleted the whole loop, the meter would also read 0 bytes, but for the wrong reason. Writing the result to a <code>volatile</code> field stops that.</p>
 
       <h3>4.4 Telling replacement from deoptimization</h3>
 
@@ -374,11 +425,11 @@
 
       <h3>4.5 The Windows trap the tool survives</h3>
 
-      <p><strong>What goes wrong without care.</strong> In Windows PowerShell 5.1, the <code>&gt;</code> redirection writes text as UTF-16, where every character takes two bytes, starting with two marker bytes, <code>FF FE</code>. Almost every other shell writes plain UTF-8. Read that UTF-16 file as UTF-8 and every line is garbage, nothing parses, and the tool would cheerfully report &ldquo;0 compilations&rdquo;. A marker at the start of a file announcing its text encoding is called a <strong>byte order mark</strong> (BOM). The tool checks the first bytes — with Lesson 01's <code>&amp; 0xFF</code>, because Java bytes are signed — and decodes accordingly. A test writes a real UTF-16 file and checks it reads back line for line.</p>
+      <p><strong>What goes wrong without care.</strong> In Windows PowerShell 5.1, the <code>&gt;</code> redirection writes text as UTF-16. In UTF-16, every character takes two bytes, and the file starts with two marker bytes, <code>FF FE</code>. Almost every other shell writes plain UTF-8. If you read that UTF-16 file as UTF-8, every line is garbage and nothing parses. The tool would happily report &ldquo;0 compilations&rdquo;. A marker at the start of a file that says which text encoding it uses is called a <strong>byte order mark</strong> (BOM). The tool checks the first bytes and decodes the file to match. It uses Lesson 01's <code>&amp; 0xFF</code>, because Java bytes are signed. A test writes a real UTF-16 file and checks that it reads back line for line.</p>
 
       <h3>4.6 The tests</h3>
 
-      <p>Parsing and reporting are pure string work, so they are tested exactly against a hand-worked sample. The JIT itself is tested only where a guarantee exists. <code>JitSubjectsTest</code> pins every answer, because the JIT's one absolute promise is that compiled code computes exactly what interpreted code does. <code>AllocationMeterTest</code> checks that a 1 MB array that escapes is counted in full. No test asserts that escape analysis <em>removes</em> an allocation, because whether C2 compiles something during a test run is not guaranteed. That is an observation for your terminal.</p>
+      <p>Parsing and reporting are pure text work. So they are tested exactly, against a sample worked out by hand. The JIT itself is tested only where it makes a firm promise. <code>JitSubjectsTest</code> checks every answer exactly. That is because the JIT's one firm promise is that compiled code works out exactly what interpreted code does. <code>AllocationMeterTest</code> checks that a 1 MB array that escapes is counted in full. No test checks that escape analysis <em>removes</em> an object. Nothing promises that C2 will compile something during a test run. That is something to watch in your terminal.</p>
 
       <pre class="code"><code><span class="cmt">// A tier 3 retirement is replacement; a tier 4 retirement is deoptimization.</span>
 <span class="anno">@Test</span>
@@ -409,7 +460,7 @@ mvn test</code></pre>
 [INFO] BUILD SUCCESS</code></pre>
 
       <div class="callout tryit">
-        <p>Run <code>mvn test</code> from <code>jvm-explorer/</code> and check for <strong>105 tests, all green</strong>. If it does not match, the machine is right — tell me what you saw.</p>
+        <p>Run <code>mvn test</code> from <code>jvm-explorer/</code> and check for <strong>105 tests, all green</strong>. If it does not match, the machine is right. Tell me what you saw.</p>
       </div>
 
       <pre class="terminal"><code>mvn compile exec:java</code></pre>
@@ -421,7 +472,7 @@ time spent compiling so far : 1840 ms (on background compiler threads)
 <span class="out">bytes per call, first batch     : 23.9 bytes per call</span>
 <span class="out">bytes per call, after warm-up   : 0.0 bytes per call</span></code></pre>
 
-      <p>Now the experiment. It needs a plain <code>java</code> command, because the flag must reach the program's own JVM:</p>
+      <p>Now the experiment. It needs a plain <code>java</code> command, because the flag must reach the program's own JVM, not Maven's:</p>
 
       <pre class="terminal"><code>mvn compile
 java -XX:+PrintCompilation -cp target/classes com.corejava.jvm.experiments.JitExperiment &gt; jit.log
@@ -453,7 +504,14 @@ story of methods matching "JitSubjects":
     930 ms  JitSubjects::totalArea       compiled at tier 4 (C2)  [#575]
 === DONE (sink = ...) ===</code></pre>
 
-      <p>Read it as a story: nothing in phase 1; the 0 → 3 → 4 climb in phase 2, followed by a <em>replacement</em>; an OSR compilation in phase 3 for a method called only once; and the moment of interest in phase 5b, where the <strong>tier 4</strong> version of <code>totalArea</code> is retired the instant <code>Circle</code> arrives, then recompiled. Most of the summary's thousand-odd compilations are the JDK's own methods. Every Java program compiles a lot of the standard library on its way up.</p>
+      <p>Read it as a story:</p>
+      <ul>
+        <li>Phase 1: nothing.</li>
+        <li>Phase 2: the 0 → 3 → 4 climb, followed by a <em>replacement</em>.</li>
+        <li>Phase 3: an OSR compilation, for a method called only once.</li>
+        <li>Phase 5b: the key moment. The <strong>tier 4</strong> version of <code>totalArea</code> is retired the moment <code>Circle</code> arrives. Then it is compiled again.</li>
+      </ul>
+      <p>Most of the thousand or so compilations in the summary are the JDK's own methods. Every Java program compiles a lot of the standard library as it warms up.</p>
 
       <p>Open <code>jit.log</code> itself to read phase 4's allocation lines. Then switch escape analysis off and compare:</p>
 
@@ -472,10 +530,10 @@ java -XX:-DoEscapeAnalysis -cp target/classes com.corejava.jvm.experiments.JitEx
   ...
   batch 8: 24.0 bytes per call</code></pre>
 
-      <p>The only difference between those runs is one switch, and the second one hands the collector tens of megabytes more garbage in phase 4 (eight batches of 200,000 calls at about 24 bytes each is about 38 MB, against a few megabytes when escape analysis kicks in). The roughly 24 bytes is one small object on a 64-bit HotSpot JVM: a 12-byte header plus two 4-byte <code>int</code>s, rounded up to a multiple of 8. Exact sizes depend on the JDK and its settings.</p>
+      <p>The only difference between those runs is one switch. But the second run gives the collector tens of megabytes more garbage in phase 4. Eight batches of 200,000 calls at about 24 bytes each is about 38 MB. With escape analysis on, it is only a few megabytes. The roughly 24 bytes is one small object on a 64-bit HotSpot JVM: a 12-byte header plus two 4-byte <code>int</code>s, rounded up to a multiple of 8. Exact sizes depend on the JDK and its settings.</p>
 
       <div class="callout tryit">
-        <p>Run all of it and compare the shapes. If your phase 4 never reaches 0, try more batches, or check that no <code>-XX:TieredStopAtLevel</code> flag is set. If PowerShell's <code>&gt;</code> wrote the file, the tool still reads it. <strong>Project state: compiles, 105 tests green</strong> (predicted). Every number is your machine's; where the shape differs, the machine wins — tell me what you saw.</p>
+        <p>Run all of it and compare the shapes. If your phase 4 never reaches 0, try more batches. Also check that no <code>-XX:TieredStopAtLevel</code> flag is set. If PowerShell's <code>&gt;</code> wrote the file, the tool can still read it. <strong>Project state: compiles, 105 tests green</strong> (predicted). Only your machine can give these numbers. Where the shape is different, the machine wins. Tell me what you saw.</p>
       </div>
     </section>
 
@@ -483,10 +541,16 @@ java -XX:-DoEscapeAnalysis -cp target/classes com.corejava.jvm.experiments.JitEx
     <section id="s5">
       <h2><span class="sec-num">5</span> In the wild</h2>
 
-      <p>For a handful of JDK methods, HotSpot does not compile the Java source at all. It substitutes hand-written machine code it carries built in, tuned for the processor it is running on. A method replaced like this is called an <strong>intrinsic</strong>. <code>System.arraycopy</code>, many <code>Math</code> methods, <code>String.equals</code> and parts of <code>Arrays</code> and of the cryptography code are intrinsified on common platforms — which is why calling <code>System.arraycopy</code> beats any loop you could write, however hot. (The exact list varies by JDK and processor; <code>-XX:+PrintInlining</code> marks them with <code>(intrinsic)</code> — to verify.) It is the strongest argument for using standard library methods instead of reimplementing them: the JVM has a faster version of them than your source could ever compile to.</p>
+      <p>For a few JDK methods, HotSpot does not compile the Java source at all. Instead, it uses hand-written machine code that is built into it, tuned for the processor it is running on. A method replaced like this is called an <strong>intrinsic</strong>. On common platforms, these are intrinsics: <code>System.arraycopy</code>, many <code>Math</code> methods, <code>String.equals</code>, and parts of <code>Arrays</code> and of the cryptography code. That is why calling <code>System.arraycopy</code> beats any loop you could write, however hot. (The exact list changes by JDK and processor. <code>-XX:+PrintInlining</code> marks them with <code>(intrinsic)</code>. Check this yourself.) It is the strongest reason to use standard library methods instead of writing your own. The JVM has a faster version of them than your source could ever compile to.</p>
 
       <div class="callout realworld">
-        <p>Warm-up is a deployment problem, not just a benchmarking one. A freshly started service runs interpreted, at a fraction of its eventual speed, and the first users after a deploy pay for it. Real teams handle this deliberately. They send synthetic &ldquo;warm-up&rdquo; traffic before putting an instance behind the load balancer. They delay readiness checks until hot paths have run. They roll out gradually, so only a few cold instances serve traffic at once. And the JDK keeps adding features to save or reuse warm-up work across runs — class-data sharing, and newer ahead-of-time caches (version-specific; outside this course). In interviews, &ldquo;why is the first request slow?&rdquo; has a precise answer now: class loading, interpretation, and compilation still in progress.</p>
+        <p>Warm-up is a deployment problem, not just a benchmarking one. A freshly started service runs in the interpreter, at a fraction of its final speed. The first users after a deploy pay for it. Real teams plan for this:</p>
+        <ul>
+          <li>They send fake &ldquo;warm-up&rdquo; traffic before putting a new instance behind the load balancer.</li>
+          <li>They delay readiness checks until the hot code paths have run.</li>
+          <li>They roll out slowly, so only a few cold instances serve traffic at once.</li>
+        </ul>
+        <p>The JDK also keeps adding features to save or reuse warm-up work across runs, such as class-data sharing and newer ahead-of-time caches. (These depend on the version and are outside this course.) In interviews, &ldquo;why is the first request slow?&rdquo; now has an exact answer: class loading, the interpreter, and compilation still in progress.</p>
       </div>
     </section>
 
@@ -494,11 +558,11 @@ java -XX:-DoEscapeAnalysis -cp target/classes com.corejava.jvm.experiments.JitEx
     <section id="s6">
       <h2><span class="sec-num">6</span> Gotchas and common mistakes</h2>
       <ul>
-        <li><strong>Timing cold code.</strong> A single <code>nanoTime</code> measurement mostly times the interpreter, class loading and compilation in progress. People do it because it looks like measurement. <em>Avoid it:</em> use JMH for anything you will base a decision on, and for quick checks at least warm up first, repeat, and use the result so it cannot be deleted.</li>
-        <li><strong>Hand-optimising for the interpreter.</strong> Merging small methods, pooling short-lived objects and reusing scratch fields all make code worse to save costs that C2 already removes from hot code — and pooling can make objects live longer, so they get promoted and cost the collector more (Lesson 04). <em>Avoid it:</em> write clear code, measure, and optimise only what a profiler shows is hot.</li>
-        <li><strong>Megamorphic call sites in hot loops.</strong> A call through an interface that sees three or more implementations in one hot place cannot be inlined, so it blocks escape analysis and the other optimisations that depend on inlining. People hit this by funnelling many unrelated types through one generic loop. <em>Avoid it:</em> only worry about it if a profiler points at it — and then keep each hot call site seeing few types.</li>
-        <li><strong>Huge methods are never compiled.</strong> By default HotSpot refuses to JIT-compile a method larger than 8,000 bytes of bytecode, and leaves it in the interpreter forever. That is easy to hit by accident with a generated parser or a giant <code>switch</code> (flag names <code>DontCompileHugeMethods</code> / <code>HugeMethodLimit</code>, to verify). <em>Avoid it:</em> keep methods reasonably small — which the JIT's inlining makes free anyway.</li>
-        <li><strong>Reading every &ldquo;made not entrant&rdquo; as a problem.</strong> Most are tier 3 versions being replaced by tier 4. <em>Avoid it:</em> look at the tier, as the project's report does. Repeated tier 4 retirements of the same method are the pattern worth investigating.</li>
+        <li><strong>Timing cold code.</strong> A single <code>nanoTime</code> measurement mostly times the interpreter, class loading, and compilation in progress. People do it because it looks like measuring. <em>Avoid it:</em> use JMH for anything you will base a decision on. For quick checks, at least warm up first, repeat, and use the result so it cannot be deleted.</li>
+        <li><strong>Hand-optimising for the interpreter.</strong> Merging small methods, pooling short-lived objects and reusing scratch fields all make code worse. They save costs that C2 already removes from hot code. Pooling can also make objects live longer, so they get promoted and cost the collector more (Lesson 04). <em>Avoid it:</em> write clear code, measure, and optimise only what a profiler shows is hot.</li>
+        <li><strong>Megamorphic call sites in hot loops.</strong> Say a call through an interface sees three or more implementations in one hot place. It cannot be inlined. So it blocks escape analysis and the other optimisations that depend on inlining. People hit this by pushing many unrelated types through one generic loop. <em>Avoid it:</em> only worry about it if a profiler points at it. Then make sure each hot call site sees only a few types.</li>
+        <li><strong>Huge methods are never compiled.</strong> By default, HotSpot will not JIT-compile a method bigger than 8,000 bytes of bytecode. It leaves it in the interpreter forever. You can hit this by accident with a generated parser or a giant <code>switch</code>. (The flag names are <code>DontCompileHugeMethods</code> / <code>HugeMethodLimit</code>. Check them.) <em>Avoid it:</em> keep methods reasonably small. The JIT's inlining makes that free anyway.</li>
+        <li><strong>Treating every &ldquo;made not entrant&rdquo; as a problem.</strong> Most are tier 3 versions being replaced by tier 4. <em>Avoid it:</em> look at the tier, as the project's report does. The pattern worth looking into is the same method being retired from tier 4 again and again.</li>
       </ul>
     </section>
 
@@ -506,11 +570,11 @@ java -XX:-DoEscapeAnalysis -cp target/classes com.corejava.jvm.experiments.JitEx
     <section id="s7">
       <h2><span class="sec-num">7</span> Key takeaways</h2>
       <ul>
-        <li>HotSpot profiles running code and moves hot methods up the tiers — usually from the interpreter (0) to C1 with profiling (3) to C2 (4) — and on-stack replacement compiles a long-running loop while it is still running.</li>
-        <li>Inlining copies small and hot methods into their callers, which removes the call and, more importantly, lets C2 optimise across what used to be method boundaries — so small methods cost nothing once code is hot.</li>
-        <li>Escape analysis lets C2 skip creating objects that never leave a method, replacing them with plain local values, which is why short-lived local allocation is far cheaper than intuition suggests.</li>
-        <li>C2's best optimisations are speculative bets on the profile, and when a bet is lost the compiled code is made not entrant, running frames fall back to the interpreter, and the method is recompiled — the program's results never change.</li>
-        <li>The first run is slow because of class loading, interpretation and compilation in progress, so any timing taken without warm-up is meaningless; <code>-XX:+PrintCompilation</code> shows every step, and JMH is the tool for real measurement.</li>
+        <li>HotSpot profiles running code and moves hot methods up the tiers, usually from the interpreter (0) to C1 with profiling (3) to C2 (4). On-stack replacement compiles a long-running loop while it is still running.</li>
+        <li>Inlining copies small and hot methods into their callers. That removes the call and, more importantly, lets C2 optimise across what used to be method walls. So small methods cost nothing once code is hot.</li>
+        <li>Escape analysis lets C2 skip making objects that never leave a method, and use plain local values instead. That is why short-lived local objects are much cheaper than you would guess.</li>
+        <li>C2's best optimisations are guesses based on the profile. When a guess is wrong, the compiled code is made not entrant, running frames fall back to the interpreter, and the method is compiled again. The program's results never change.</li>
+        <li>The first run is slow because of class loading, the interpreter, and compilation in progress, so any timing taken without warm-up is meaningless. <code>-XX:+PrintCompilation</code> shows every step, and JMH is the tool for real measurement.</li>
       </ul>
     </section>
 
@@ -529,9 +593,14 @@ java -XX:-DoEscapeAnalysis -cp target/classes com.corejava.jvm.experiments.JitEx
    9460  140       3       com.acme.Prices::convert (41 bytes)
    9900  152       4       com.acme.Prices::convert (41 bytes)</code></pre>
 
-      <p>(1) Why did <code>Price::amount</code> go straight to tier 1? (2) What is special about compilation 95, and what does it tell you about <code>importAll</code>? (3) Of the two &ldquo;made not entrant&rdquo; lines, which is a replacement and which is a deoptimization? (4) Suggest one thing that might have happened in the program around 9.4 seconds.</p>
+      <ol>
+        <li>Why did <code>Price::amount</code> go straight to tier 1?</li>
+        <li>What is special about compilation 95? What does it tell you about <code>importAll</code>?</li>
+        <li>Of the two &ldquo;made not entrant&rdquo; lines, which is a replacement and which is a deoptimization?</li>
+        <li>Suggest one thing that might have happened in the program around 9.4 seconds.</li>
+      </ol>
 
-      <p><strong>Part B — predict the allocation.</strong> For each version, predict bytes per call once the code is hot, with escape analysis on:</p>
+      <p><strong>Part B — predict the allocation.</strong> For each version, predict the bytes per call once the code is hot, with escape analysis on:</p>
 
       <pre class="code"><code><span class="cmt">// (a) the project's version: the object never leaves</span>
 <span class="kw">int</span> <span class="fn">a</span>(<span class="kw">int</span> x, <span class="kw">int</span> y) { <span class="ty">Delta</span> d = <span class="kw">new</span> <span class="ty">Delta</span>(x, y); <span class="kw">return</span> d.dx() + d.dy(); }
@@ -543,29 +612,46 @@ java -XX:-DoEscapeAnalysis -cp target/classes com.corejava.jvm.experiments.JitEx
 <span class="cmt">// (c) the object is returned to the caller</span>
 <span class="ty">Delta</span> <span class="fn">c</span>(<span class="kw">int</span> x, <span class="kw">int</span> y) { <span class="kw">return new</span> <span class="ty">Delta</span>(x, y); }</code></pre>
 
-      <p><strong>Part C — check yourself on the machine.</strong> Run <code>JitExperiment</code> with <code>-XX:TieredStopAtLevel=1</code> and predict phase 4's numbers before you look. Then run it with <code>-Xint</code> and notice how long phase 3 takes.</p>
+      <p><strong>Part C — check yourself on the machine.</strong> Run <code>JitExperiment</code> with <code>-XX:TieredStopAtLevel=1</code>. Predict phase 4's numbers before you look. Then run it with <code>-Xint</code>, and notice how long phase 3 takes.</p>
 
       <details class="answer">
         <summary>Click to reveal the answer</summary>
 
-        <p><strong>Part A (1).</strong> <code>Price::amount</code> is 5 bytes of bytecode — almost certainly a getter. C2 could not produce anything better for it than C1 does, so profiling it would be wasted effort: it goes straight to tier 1, C1 without profiling. (In practice it will also be inlined into its hot callers, where the call disappears entirely.)</p>
+        <p><strong>Part A (1).</strong> <code>Price::amount</code> is 5 bytes of bytecode, so it is almost certainly a getter. C2 could not make anything better for it than C1 does. So profiling it would be wasted effort. It goes straight to tier 1: C1 without profiling. (In practice, it will also be inlined into its hot callers, where the call disappears completely.)</p>
 
-        <p><strong>Part A (2).</strong> The <code>%</code> marks an <strong>on-stack replacement</strong> compilation, entering at bytecode position 18. <code>importAll</code> was probably called once or a few times, but it contains a loop that ran long enough for the back-edge counter to trigger compilation mid-run — the shape of a &ldquo;process every record&rdquo; method.</p>
+        <p><strong>Part A (2).</strong> The <code>%</code> marks an <strong>on-stack replacement</strong> compilation, entering at bytecode position 18. <code>importAll</code> was probably called once or a few times. But it has a loop that ran long enough for the back-edge counter to start compilation in the middle of the run. That is what a &ldquo;process every record&rdquo; method looks like.</p>
 
-        <p><strong>Part A (3).</strong> At 291 ms, compilation 88 — <strong>tier 3</strong> — is retired one millisecond after tier 4 compilation 101 arrived: a <strong>replacement</strong>, healthy. At 9400 ms, compilation 101 — <strong>tier 4</strong> — is retired: a <strong>deoptimization</strong>. The method then climbs again: tier 3 at 9460 ms, tier 4 at 9900 ms.</p>
+        <p><strong>Part A (3).</strong> At 291 ms, compilation 88 (<strong>tier 3</strong>) is retired, one millisecond after tier 4 compilation 101 arrived. That is a <strong>replacement</strong>, and it is healthy. At 9400 ms, compilation 101 (<strong>tier 4</strong>) is retired. That is a <strong>deoptimization</strong>. The method then climbs again: tier 3 at 9460 ms, tier 4 at 9900 ms.</p>
 
-        <p><strong>Part A (4).</strong> Something broke an assumption C2 had made about <code>convert</code>. For example: a new <code>Currency</code> implementation was loaded for the first time, so an interface call inside <code>convert</code> stopped being monomorphic; or a branch that had never been taken in nine seconds finally was — say, the first price with a rare rounding rule. A plugin loading, a new kind of input arriving, or a rarely used feature being touched are the usual triggers.</p>
+        <p><strong>Part A (4).</strong> Something broke a guess C2 had made about <code>convert</code>. For example, a new <code>Currency</code> implementation was loaded for the first time. So an interface call inside <code>convert</code> stopped being monomorphic. Or a branch that had never been taken in nine seconds finally was, such as the first price with a rare rounding rule. The usual causes are a plugin loading, a new kind of input arriving, or a rarely used feature being used.</p>
 
-        <p><strong>Part B.</strong> (a) <strong>About 0</strong> once hot: the object never escapes, so it is scalar-replaced. (b) <strong>About 24</strong> (one object per call): storing it in a static field makes it reachable from anywhere, so it escapes and must really exist. (c) <strong>About 24 — usually.</strong> Returning an object makes it escape <code>c</code> itself. <em>But</em> if <code>c</code> is inlined into a hot caller that only reads the fields and then drops the object, then, inside that caller, the object no longer escapes, and escape analysis can remove it after all. This is exactly why inlining comes first: escape is judged in the code as compiled, after inlining, not method by method in your source.</p>
+        <p><strong>Part B.</strong></p>
+        <ul>
+          <li>(a) <strong>About 0</strong> once hot. The object never escapes, so it is replaced by plain values (scalar replacement).</li>
+          <li>(b) <strong>About 24</strong> (one object per call). Storing it in a static field makes it reachable from anywhere. So it escapes, and it must really exist.</li>
+          <li>(c) <strong>About 24, usually.</strong> Returning an object makes it escape <code>c</code> itself. <em>But</em> say <code>c</code> is inlined into a hot caller that only reads the fields and then drops the object. Inside that caller, the object no longer escapes. So escape analysis can remove it after all. This is exactly why inlining comes first. Escape is judged on the code as compiled, after inlining. It is not judged method by method in your source.</li>
+        </ul>
 
-        <p><strong>Part C.</strong> With <code>-XX:TieredStopAtLevel=1</code>, nothing ever reaches C2, and C1 does no escape analysis, so phase 4 should stay at <strong>about 24 bytes per call in every batch</strong> — the same as <code>-XX:-DoEscapeAnalysis</code>, for a different reason. With <code>-Xint</code> there is no compiler at all: phase 3's 50-million-iteration loop runs entirely in the interpreter, typically tens of times slower than with the JIT, and <code>jit.log</code> would contain no compilation lines. If your machine shows something else, it wins — tell me what you saw.</p>
+        <p><strong>Part C.</strong> With <code>-XX:TieredStopAtLevel=1</code>, nothing ever reaches C2, and C1 does no escape analysis. So phase 4 should stay at <strong>about 24 bytes per call in every batch</strong>. That is the same as <code>-XX:-DoEscapeAnalysis</code>, for a different reason. With <code>-Xint</code>, there is no compiler at all. Phase 3's loop of 50 million rounds runs entirely in the interpreter. It is usually tens of times slower than with the JIT, and <code>jit.log</code> would have no compilation lines. If your machine shows something else, it wins. Tell me what you saw.</p>
       </details>
     </section>
 
     <!-- ===================== SECTION 9 — ALMANAC ===================== -->
     <section id="s9">
       <h2><span class="sec-num">9</span> Almanac update</h2>
-      <p>Added to <code>almanac.md</code>: profiling and what a profile records; the tier table (0 to 4) and the usual 0 → 3 → 4 path; back-edges and on-stack replacement; inlining, its rough size limits, and why small methods are free; monomorphic, bimorphic and megamorphic call sites and class hierarchy analysis; escape analysis, scalar replacement and lock elision, with their limits; speculation, deoptimization, and replacement versus deoptimization in &ldquo;made not entrant&rdquo;; why warm-up happens and how to measure honestly; the <code>-XX:+PrintCompilation</code> columns and the experiment switches; intrinsics; the huge-method limit; and the code cache.</p>
+      <p>Added to <code>almanac.md</code>:</p>
+      <ul>
+        <li>Profiling, and what a profile records.</li>
+        <li>The tier table (0 to 4), and the usual 0 → 3 → 4 path.</li>
+        <li>Back-edges and on-stack replacement.</li>
+        <li>Inlining, its rough size limits, and why small methods are free.</li>
+        <li>Monomorphic, bimorphic and megamorphic call sites, and class hierarchy analysis.</li>
+        <li>Escape analysis, scalar replacement and lock elision, with their limits.</li>
+        <li>Speculation, deoptimization, and how to tell replacement from deoptimization in &ldquo;made not entrant&rdquo;.</li>
+        <li>Why warm-up happens, and how to measure honestly.</li>
+        <li>The <code>-XX:+PrintCompilation</code> columns, and the experiment switches.</li>
+        <li>Intrinsics, the huge-method limit, and the code cache.</li>
+      </ul>
     </section>
 
     <!-- ===================== SECTION 10 — WHAT IS NEXT ===================== -->
@@ -573,7 +659,7 @@ java -XX:-DoEscapeAnalysis -cp target/classes com.corejava.jvm.experiments.JitEx
       <div class="nextup">
         <p class="kicker">What is next</p>
         <h2><a href="../../phase-3-observing/chapter-04-live-jvm-tools/lesson-07-seeing-inside-a-live-jvm.html">Lesson 07 — Seeing inside a live JVM</a></h2>
-        <p>Every lesson so far has had the program report on itself. Lesson 07 looks in from the outside: <code>jcmd</code>, <code>jmap</code>, <code>jstack</code> and a visual tool aimed at a running jvm-explorer, a heap dump read by hand to find a memory leak planted on purpose — and then the whole course, joined up, through the life of one object from <code>new</code> to collection.</p>
+        <p>Every lesson so far has had the program report on itself. Lesson 07 looks in from the outside. You will point <code>jcmd</code>, <code>jmap</code>, <code>jstack</code> and a visual tool at a running jvm-explorer. You will read a heap dump by hand to find a memory leak planted on purpose. Then you will join up the whole course by following the life of one object, from <code>new</code> to collection.</p>
       </div>
     </section>
 
