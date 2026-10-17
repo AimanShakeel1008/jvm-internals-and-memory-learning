@@ -21,6 +21,8 @@ The course text is a self-contained HTML learning system — open **[`lessons/in
 
 `almanac.md` collects every rule of thumb, lesson by lesson, and ends with **the whole course on one page**: the life of one object from `new` to collection.
 
+For revision, **[`lessons/cheatsheet-and-interview-prep.html`](lessons/cheatsheet-and-interview-prep.html)** compresses every lesson into tables, lists every flag and command, and drills you with 50 interview questions, 5 predict-the-output puzzles and 14 production scenarios, all with hidden answers.
+
 ## The project: jvm-explorer
 
 `jvm-explorer/` is a Maven project built to provoke and observe the JVM itself. `mvn compile exec:java` runs a report with one section per lesson; the `experiments` package holds labelled for-learning-only programs that push the JVM to each behaviour on purpose.
@@ -93,6 +95,7 @@ Two runs above end in `OutOfMemoryError` when asked to (`--oom`, or `LeakHunt` w
 lessons/            the HTML learning system — start at lessons/index.html
   assets/lesson.css   the one shared stylesheet for every page
   index.html          course hub + roadmap
+  cheatsheet-and-interview-prep.html   revision sheet + interview drill
   <phase>/<chapter>/  standalone lesson HTML pages
 jvm-explorer/       the Maven project the course builds
 glossary.md         every term the course introduces, in plain language

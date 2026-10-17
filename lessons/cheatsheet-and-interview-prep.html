@@ -1,0 +1,879 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cheatsheet &amp; Interview Prep · JVM Internals &amp; Memory</title>
+  <link rel="stylesheet" href="assets/lesson.css">
+</head>
+<body>
+<div class="page">
+
+  <!-- ============================ TOC SIDEBAR ============================ -->
+  <aside class="toc">
+    <p class="toc-title">On this page</p>
+    <ol>
+      <li><a href="#s1">1 · The whole JVM on one page</a></li>
+      <li><a href="#s2">2 · Cheatsheet by topic</a></li>
+      <li><a href="#s3">3 · Flags &amp; commands</a></li>
+      <li><a href="#s4">4 · Numbers worth knowing</a></li>
+      <li><a href="#s5">5 · Myths vs facts</a></li>
+      <li><a href="#s6">6 · Interview questions</a></li>
+      <li><a href="#s7">7 · Predict-the-output puzzles</a></li>
+      <li><a href="#s8">8 · Production scenarios</a></li>
+      <li><a href="#s9">9 · How to answer well</a></li>
+      <li><a href="#s10">10 · Night-before checklist</a></li>
+    </ol>
+    <nav class="toc-nav" aria-label="Course navigation">
+      <a class="navcard" href="phase-3-observing/chapter-04-live-jvm-tools/lesson-07-seeing-inside-a-live-jvm.html">
+        <span class="navkicker">← Prev · Lesson 07</span>
+        <span class="navtitle">Seeing Inside a Live JVM</span>
+      </a>
+      <a class="navmap" href="index.html">↑ Course map</a>
+      <span class="navcard disabled">
+        <span class="navkicker">Next →</span>
+        <span class="navtitle">End of course 01</span>
+        <span class="navnote">the series continues with course 02</span>
+      </span>
+    </nav>
+  </aside>
+
+  <!-- ============================ MAIN CONTENT ============================ -->
+  <main>
+
+    <header class="banner">
+      <p class="kicker">Core Java · Course 01 · JVM Internals &amp; Memory</p>
+      <h1>Cheatsheet &amp; Interview Prep</h1>
+      <p class="subtitle">Everything from the eight lessons, compressed for revision: tables to skim, flags and numbers to remember, myths to retire, fifty interview questions and five predict-the-output puzzles, each with a hidden answer to test yourself against.</p>
+      <p class="meta">
+        <strong>Covers:</strong> Lessons 00–07 &nbsp;·&nbsp;
+        <strong>Use with:</strong> <code>almanac.md</code> (the long-form rules) and <code>glossary.md</code> (every term) &nbsp;·&nbsp;
+        <strong>Pinned to:</strong> Java 21 (HotSpot)
+      </p>
+    </header>
+
+    <div class="callout note">
+      <p><strong>How to use this page.</strong> Skim Sections 1–5 the day before an interview. Work through Sections 6–8 a few days earlier: read each question, answer it <em>out loud</em>, then open it and compare. The answers are deliberately short, because a strong interview answer is short. Each one names the lesson to reread if your answer was shaky. Figures marked <em>verify</em> are HotSpot defaults that can change between JDK versions, so check them with <code>java -XX:+PrintFlagsFinal -version</code> rather than quoting them as laws. Printing to PDF? Open the questions you want first; closed answers stay hidden on paper.</p>
+    </div>
+
+    <!-- ===================== SECTION 1 — ONE PAGE ===================== -->
+    <section id="s1">
+      <h2><span class="sec-num">1</span> The whole JVM on one page</h2>
+
+      <figure class="fig">
+        <svg viewBox="0 0 720 360" role="img" aria-label="The JVM in one picture. On the left, Foo.java is compiled by javac into Foo.class. The class loaders — bootstrap, platform and application — load it. Inside the JVM, per-thread stacks hold frames whose slots point into the shared heap, which is divided into Eden, two survivor spaces and the old generation. Metaspace holds class descriptions and the code cache holds JIT-compiled code. Underneath, the garbage collector works on the heap, the JIT fills the code cache, and outside tools such as jcmd look into the whole process.">
+          <defs>
+            <marker id="csah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path class="fig-arrow-h" d="M0,0 L10,5 L0,10 z"/>
+            </marker>
+            <marker id="csaa" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path class="fig-arrow-accent-h" d="M0,0 L10,5 L0,10 z"/>
+            </marker>
+          </defs>
+
+          <!-- source to class file -->
+          <rect class="fig-code" x="10" y="30" width="112" height="46" rx="9"/>
+          <text class="fig-label" x="66" y="52" text-anchor="middle">Foo.java</text>
+          <text class="fig-small" x="66" y="68" text-anchor="middle">your source</text>
+          <rect class="fig-infra" x="10" y="100" width="112" height="40" rx="9"/>
+          <text class="fig-label" x="66" y="124" text-anchor="middle">javac (L01)</text>
+          <rect class="fig-code" x="10" y="164" width="112" height="46" rx="9"/>
+          <text class="fig-label" x="66" y="186" text-anchor="middle">Foo.class</text>
+          <text class="fig-small" x="66" y="202" text-anchor="middle">CAFEBABE · v65</text>
+          <path class="fig-arrow" d="M66,78 L66,96" marker-end="url(#csah)"/>
+          <path class="fig-arrow" d="M66,142 L66,160" marker-end="url(#csah)"/>
+
+          <!-- class loaders -->
+          <rect class="fig-box" x="146" y="28" width="158" height="186" rx="12"/>
+          <text class="fig-label" x="225" y="48" text-anchor="middle">class loaders (L02)</text>
+          <rect class="fig-infra" x="160" y="60" width="130" height="38" rx="8"/>
+          <text class="fig-small" x="225" y="83" text-anchor="middle">bootstrap · java.base</text>
+          <rect class="fig-infra" x="160" y="110" width="130" height="38" rx="8"/>
+          <text class="fig-small" x="225" y="133" text-anchor="middle">platform · rest of JDK</text>
+          <rect class="fig-infra" x="160" y="160" width="130" height="38" rx="8"/>
+          <text class="fig-small" x="225" y="183" text-anchor="middle">app · your class path</text>
+          <path class="fig-arrow-accent" d="M182,158 L182,152" marker-end="url(#csaa)"/>
+          <path class="fig-arrow-accent" d="M182,108 L182,102" marker-end="url(#csaa)"/>
+          <path class="fig-arrow" d="M124,187 L156,180" marker-end="url(#csah)"/>
+
+          <!-- runtime areas -->
+          <rect class="fig-box" x="318" y="20" width="392" height="250" rx="14"/>
+          <text class="fig-label" x="514" y="40" text-anchor="middle">JVM runtime areas (L03)</text>
+
+          <rect class="fig-code" x="332" y="50" width="110" height="102" rx="10"/>
+          <text class="fig-small" x="387" y="66" text-anchor="middle">thread stacks</text>
+          <rect class="fig-generic" x="344" y="74" width="86" height="20" rx="5"/>
+          <text class="fig-small" x="387" y="88" text-anchor="middle">frame</text>
+          <rect class="fig-generic" x="344" y="98" width="86" height="20" rx="5"/>
+          <text class="fig-small" x="387" y="112" text-anchor="middle">frame</text>
+          <rect class="fig-generic" x="344" y="122" width="86" height="20" rx="5"/>
+          <text class="fig-small" x="387" y="136" text-anchor="middle">frame</text>
+
+          <rect class="fig-infra" x="452" y="50" width="246" height="102" rx="10"/>
+          <text class="fig-small" x="575" y="66" text-anchor="middle">heap — every object (L03–05)</text>
+          <rect class="fig-accent2" x="462" y="74" width="110" height="32" rx="6"/>
+          <text class="fig-small" x="517" y="94" text-anchor="middle">Eden</text>
+          <rect class="fig-accent2" x="580" y="74" width="52" height="32" rx="6"/>
+          <text class="fig-small" x="606" y="94" text-anchor="middle">S0</text>
+          <rect class="fig-accent2" x="638" y="74" width="52" height="32" rx="6"/>
+          <text class="fig-small" x="664" y="94" text-anchor="middle">S1</text>
+          <rect class="fig-accent2" x="462" y="114" width="228" height="30" rx="6"/>
+          <text class="fig-small" x="576" y="133" text-anchor="middle">old generation</text>
+          <path class="fig-arrow-accent" d="M432,84 L458,88" marker-end="url(#csaa)"/>
+
+          <rect class="fig-infra" x="332" y="162" width="180" height="44" rx="9"/>
+          <text class="fig-small" x="422" y="181" text-anchor="middle">Metaspace</text>
+          <text class="fig-small" x="422" y="197" text-anchor="middle">one description per class</text>
+          <rect class="fig-infra" x="522" y="162" width="176" height="44" rx="9"/>
+          <text class="fig-small" x="610" y="181" text-anchor="middle">code cache</text>
+          <text class="fig-small" x="610" y="197" text-anchor="middle">JIT-compiled machine code</text>
+          <path class="fig-arrow" d="M292,186 L328,184" marker-end="url(#csah)"/>
+
+          <text class="fig-small" x="514" y="236" text-anchor="middle">a frame slot holds an ARROW to a heap object, never the object</text>
+          <text class="fig-small" x="514" y="254" text-anchor="middle">stacks: per thread · heap, Metaspace, code cache: shared</text>
+
+          <!-- the machinery underneath -->
+          <rect class="fig-generic" x="12" y="300" width="290" height="44" rx="9"/>
+          <text class="fig-small" x="157" y="318" text-anchor="middle">outside tools (L07): jps · jcmd · jstack</text>
+          <text class="fig-small" x="157" y="334" text-anchor="middle">histograms · heap dumps · VisualVM</text>
+          <path class="fig-arrow" d="M302,316 L326,274" marker-end="url(#csah)"/>
+
+          <rect class="fig-infra" x="440" y="300" width="154" height="44" rx="9"/>
+          <text class="fig-small" x="517" y="318" text-anchor="middle">garbage collector</text>
+          <text class="fig-small" x="517" y="334" text-anchor="middle">reachability (L04) · G1… (L05)</text>
+          <path class="fig-arrow-accent" d="M517,298 L517,156" marker-end="url(#csaa)"/>
+
+          <rect class="fig-infra" x="604" y="300" width="104" height="44" rx="9"/>
+          <text class="fig-small" x="656" y="318" text-anchor="middle">JIT · C1 / C2</text>
+          <text class="fig-small" x="656" y="334" text-anchor="middle">(L01, L06)</text>
+          <path class="fig-arrow-accent" d="M656,298 L656,210" marker-end="url(#csaa)"/>
+        </svg>
+        <figcaption><strong>Every lesson is one part of this picture.</strong> Amber = your code and the per-thread stacks running it; teal = JVM machinery and shared regions; indigo = the generations inside the heap; grey = frames, and the tools that look in from outside. Lesson 00 sits under all of it: a pinned Java 21, so the picture is the one you actually run.</figcaption>
+      </figure>
+
+      <p><strong>The life of one object</strong> — the answer to almost any &ldquo;walk me through what happens when…&rdquo; question:</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Stage</th><th>What happens to <code>new Order(...)</code></th><th>Lesson</th></tr></thead>
+          <tbody>
+            <tr><td>Compiled</td><td><code>new</code> → <code>dup</code> → <code>invokespecial &lt;init&gt;</code>, in a class file with major version 65</td><td><a href="phase-1-foundations/chapter-01-how-java-runs/lesson-01-how-java-runs.html">01</a></td></tr>
+            <tr><td>Class loaded</td><td>app loader delegates up, then finds <code>Order.class</code>; verify, prepare, resolve; <code>&lt;clinit&gt;</code> runs once; description in Metaspace</td><td><a href="phase-1-foundations/chapter-01-how-java-runs/lesson-02-class-loading.html">02</a>, <a href="phase-2-memory-and-gc/chapter-02-memory-and-objects/lesson-03-runtime-memory-areas.html">03</a></td></tr>
+            <tr><td>Allocated</td><td>bump-the-pointer in the thread's TLAB in Eden; a frame slot holds the reference</td><td><a href="phase-2-memory-and-gc/chapter-02-memory-and-objects/lesson-03-runtime-memory-areas.html">03</a>, <a href="phase-2-memory-and-gc/chapter-02-memory-and-objects/lesson-04-object-lifecycle-and-gc.html">04</a></td></tr>
+            <tr><td>…or never</td><td>hot code + the object never escapes → C2 scalar-replaces it</td><td><a href="phase-2-memory-and-gc/chapter-03-gc-and-jit/lesson-06-the-jit-compiler.html">06</a></td></tr>
+            <tr><td>Dies young</td><td>method returns → unreachable → next minor GC (<code>Pause Young</code>) reclaims it without looking at it</td><td>04, <a href="phase-2-memory-and-gc/chapter-03-gc-and-jit/lesson-05-gc-algorithms-and-logs.html">05</a></td></tr>
+            <tr><td>Kept on purpose</td><td>survives, ages in survivor spaces, promoted to old; later reclaimed by a mixed/full GC</td><td>04, 05</td></tr>
+            <tr><td>Kept by mistake</td><td>a static map holds it → leak → histograms name the class → heap dump's path to GC roots names the field</td><td>04, 05, <a href="phase-3-observing/chapter-04-live-jvm-tools/lesson-07-seeing-inside-a-live-jvm.html">07</a></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ===================== SECTION 2 — CHEATSHEET ===================== -->
+    <section id="s2">
+      <h2><span class="sec-num">2</span> Cheatsheet by topic</h2>
+
+      <h3>2.1 Setup and the toolchain (<a href="phase-1-foundations/chapter-00-setup/lesson-00-full-setup.html">Lesson 00</a>)</h3>
+      <ul>
+        <li><strong>JDK = build + run</strong> (JRE + <code>javac</code>, <code>javap</code>, <code>jcmd</code>…). <strong>JRE = run only.</strong> <strong>JVM = the engine inside both</strong> (HotSpot). Developers install a JDK.</li>
+        <li><strong>PATH picks your terminal's <code>java</code>; JAVA_HOME picks Maven's.</strong> They can disagree. Check <code>mvn -version</code>, in a fresh terminal.</li>
+        <li><strong>Pin versions in committed files</strong> (<code>maven.compiler.release</code>, dependency and plugin versions) and make the build check them. Never write <code>RELEASE</code> as a version.</li>
+        <li><strong>Java 21 is LTS</strong>, which is why it is pinned. The default collector since Java 9 is G1.</li>
+      </ul>
+
+      <h3>2.2 Bytecode and the class file (<a href="phase-1-foundations/chapter-01-how-java-runs/lesson-01-how-java-runs.html">Lesson 01</a>)</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Fact</th><th>Detail</th></tr></thead>
+          <tbody>
+            <tr><td>What is portable</td><td>the compiled <code>.class</code> file (bytecode for an imaginary stack machine), not the source — and never across Java versions</td></tr>
+            <tr><td>Header (8 bytes)</td><td><code>CA FE BA BE</code> · minor (2 bytes; 65535 = preview) · major (2 bytes)</td></tr>
+            <tr><td>Version rule</td><td><strong>Java release = major − 44</strong>: 52 = Java 8, 55 = 11, 61 = 17, <strong>65 = 21</strong></td></tr>
+            <tr><td>Compatibility</td><td>newer JVM runs older files; older JVM <strong>always</strong> refuses newer → <code>UnsupportedClassVersionError</code></td></tr>
+            <tr><td>Targeting older Java</td><td><code>--release N</code> (swaps in that release's library API); never <code>-source</code>/<code>-target</code> alone</td></tr>
+            <tr><td>Instruction prefixes</td><td><code>i</code> int, <code>l</code> long, <code>f</code> float, <code>d</code> double, <code>a</code> reference</td></tr>
+            <tr><td>Descriptors</td><td><code>I</code> int, <code>J</code> long, <code>Z</code> boolean, <code>V</code> void, <code>Ljava/lang/String;</code>, <code>[I</code> = int[]</td></tr>
+            <tr><td>Signed bytes</td><td>a Java <code>byte</code> is −128..127: mask with <code>&amp; 0xFF</code> when reading binary formats</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Bytecode shape</th><th>Source it came from</th></tr></thead>
+          <tbody>
+            <tr><td><code>new</code> → <code>dup</code> → <code>invokespecial &lt;init&gt;</code></td><td><code>new Foo(...)</code> (dup because the constructor consumes one reference)</td></tr>
+            <tr><td>conditional jump forward + <code>goto</code> back</td><td>any loop — there is no loop instruction</td></tr>
+            <tr><td><code>iinc slot, 1</code></td><td><code>i++</code> as a statement</td></tr>
+            <tr><td><code>invokedynamic … makeConcatWithConstants</code></td><td>string <code>+</code> (Java 9+)</td></tr>
+            <tr><td><code>invokedynamic … LambdaMetafactory</code></td><td>a lambda</td></tr>
+            <tr><td><code>invokestatic</code> / <code>invokevirtual</code> / <code>invokespecial</code> / <code>invokeinterface</code></td><td>static method / ordinary method / constructor, <code>super.</code>, private / via an interface</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>2.3 Class loading (<a href="phase-1-foundations/chapter-01-how-java-runs/lesson-02-class-loading.html">Lesson 02</a>)</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Loader</th><th>Loads</th><th>Parent</th></tr></thead>
+          <tbody>
+            <tr><td>Bootstrap (C++, <code>getClassLoader()</code> = <code>null</code>)</td><td><code>java.base</code></td><td>—</td></tr>
+            <tr><td>Platform (<code>"platform"</code>)</td><td>other JDK modules (e.g. <code>java.sql</code>)</td><td>bootstrap</td></tr>
+            <tr><td>Application (<code>"app"</code> = <code>getSystemClassLoader()</code>)</td><td>your class path</td><td>platform</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <ul>
+        <li><strong>Parent delegation:</strong> ask the parent first, search yourself last. Gives security (a fake <code>java.lang.String</code> is unreachable), uniqueness of JDK types, and a definite &ldquo;not found&rdquo;.</li>
+        <li><strong>Identity = name + defining loader.</strong> Two loaders defining one name give two types: <code>ClassCastException: X cannot be cast to X</code>.</li>
+        <li><strong>Lifecycle:</strong> load → link (verify, prepare = default values, resolve = lazy in HotSpot) → initialize (<code>&lt;clinit&gt;</code>: static assignments and blocks in source order, once per loader, JVM-locked).</li>
+      </ul>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Initializes the class</th><th>Does not</th></tr></thead>
+          <tbody>
+            <tr><td><code>new Foo()</code></td><td><code>import</code>, declaring a variable of type <code>Foo</code></td></tr>
+            <tr><td>calling a static method declared by <code>Foo</code></td><td><code>Foo.class</code>, <code>new Foo[10]</code></td></tr>
+            <tr><td>a non-constant static field of <code>Foo</code></td><td>a <code>static final</code> compile-time constant (inlined into the caller)</td></tr>
+            <tr><td><code>Class.forName("Foo")</code></td><td><code>Class.forName("Foo", false, loader)</code>, <code>loader.loadClass("Foo")</code></td></tr>
+            <tr><td>initializing a subclass (parent first)</td><td>a superclass's static field read via the subclass name (only the declaring class wakes)</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Error</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td><code>ClassNotFoundException</code></td><td>a lookup <strong>by name, as text</strong> found nothing — a name or class-path problem</td></tr>
+            <tr><td><code>NoClassDefFoundError</code></td><td>compiled code refers to a class that is missing at run time — a packaging problem</td></tr>
+            <tr><td><code>…Could not initialize class X</code></td><td>X is present, but its <code>&lt;clinit&gt;</code> threw earlier: find the first <code>ExceptionInInitializerError</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>2.4 Runtime memory areas (<a href="phase-2-memory-and-gc/chapter-02-memory-and-objects/lesson-03-runtime-memory-areas.html">Lesson 03</a>)</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Region</th><th>Per thread or shared</th><th>Holds</th><th>Runs out as</th></tr></thead>
+          <tbody>
+            <tr><td>Stack (frames)</td><td>per thread, fixed size (<code>-Xss</code>)</td><td>locals, operand stack, return address</td><td><code>StackOverflowError</code></td></tr>
+            <tr><td>PC register / native stack</td><td>per thread</td><td>current instruction / native-call frames</td><td>—</td></tr>
+            <tr><td>Heap</td><td>shared, ceiling <code>-Xmx</code></td><td>every object and array</td><td><code>OOM: Java heap space</code></td></tr>
+            <tr><td>Metaspace</td><td>shared, native, unbounded by default</td><td>class descriptions (replaced PermGen in Java 8)</td><td><code>OOM: Metaspace</code></td></tr>
+            <tr><td>Code cache</td><td>shared</td><td>JIT-compiled code</td><td>&ldquo;CodeCache is full. Compiler has been disabled&rdquo;</td></tr>
+            <tr><td>Direct buffers (off-heap)</td><td>shared, native</td><td><code>ByteBuffer.allocateDirect</code> data</td><td><code>OOM: Direct buffer memory</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <ul>
+        <li><strong>A variable of object type holds a reference (an arrow), never the object.</strong> Primitives hold the value.</li>
+        <li><strong>Java is pass-by-value, always</strong>, including references. A method can change the caller's <em>object</em>, never the caller's <em>variable</em>.</li>
+        <li><strong>Locals are thread-safe for free</strong> (they live on one thread's stack); heap objects are shared.</li>
+        <li><strong>OOM message → investigation:</strong> <code>Java heap space</code> (retention), <code>Metaspace</code> (too many classes, loader leak), <code>GC overhead limit exceeded</code> (nearly full, collecting nothing), <code>unable to create native thread</code> (threads / OS — more <code>-Xmx</code> makes it worse).</li>
+      </ul>
+
+      <h3>2.5 Object lifecycle and GC fundamentals (<a href="phase-2-memory-and-gc/chapter-02-memory-and-objects/lesson-04-object-lifecycle-and-gc.html">Lesson 04</a>)</h3>
+      <ul>
+        <li><strong>Garbage = unreachable from every GC root.</strong> Roots: locals in live frames, static fields, running threads, JVM-internal references. Unreachable cycles are garbage too, because Java traces; it does not count references.</li>
+        <li><strong>A Java leak = no longer needed but still reachable</strong> (static collections, unbounded caches, unremoved listeners, <code>ThreadLocal</code> on pooled threads, inner classes or lambdas capturing <code>this</code>).</li>
+        <li><strong>Eligible is not collected.</strong> <code>x = null</code> makes an object eligible; the collector decides when. <code>System.gc()</code> is a request (and a full GC on HotSpot defaults).</li>
+        <li><strong>Generational hypothesis: most objects die young.</strong> Young generation = Eden + S0 + S1. A minor GC copies the live objects to the empty survivor (age +1) and wipes Eden. At the tenuring threshold, an object is promoted to old.</li>
+        <li><strong>Copying cost ∝ survivors</strong>: garbage is never looked at. <strong>Card table + write barrier</strong> let a minor GC find old→young references without scanning old.</li>
+        <li><strong>Premature promotion</strong> (survivor overflow) fills old with short-lived objects. Fix with a bigger young generation, not a bigger heap.</li>
+      </ul>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Term</th><th>Collects</th><th>Cost</th></tr></thead>
+          <tbody>
+            <tr><td>Minor GC</td><td>young generation</td><td>small — proportional to young survivors</td></tr>
+            <tr><td>Major GC</td><td>old generation</td><td>large</td></tr>
+            <tr><td>Full GC</td><td>whole heap (often Metaspace too)</td><td>largest, usually the longest pause</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>2.6 Collectors and GC logs (<a href="phase-2-memory-and-gc/chapter-03-gc-and-jit/lesson-05-gc-algorithms-and-logs.html">Lesson 05</a>)</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Collector</th><th>Mechanism</th><th>Pauses</th><th>Throughput</th><th>For</th></tr></thead>
+          <tbody>
+            <tr><td>Serial</td><td>1 thread, all stop-the-world</td><td>long, grow with heap</td><td>best on 1 CPU</td><td>tiny heaps, 1-CPU containers (auto-picked on small machines)</td></tr>
+            <tr><td>Parallel</td><td>many threads, all stop-the-world</td><td>shorter, still grow</td><td><strong>highest</strong></td><td>batch jobs</td></tr>
+            <tr><td>G1 (default)</td><td>regions, concurrent marking, mixed collections, pause goal (200 ms)</td><td>short, aimed at goal</td><td>good</td><td>general services</td></tr>
+            <tr><td>ZGC</td><td>concurrent marking <em>and</em> moving, load barriers</td><td><strong>sub-ms</strong>, independent of heap</td><td>lower</td><td>latency-critical, huge heaps</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <pre class="ascii"><code>[0.215s][info][gc] GC(0) Pause Young (Normal) (G1 Evacuation Pause) 25M-&gt;3M(256M) 2.512ms
+ uptime  level tag  id    kind        causes                        before-&gt;after(committed) pause</code></pre>
+      <ul>
+        <li><strong>Read three numbers:</strong> the count of full GCs, the <strong>max</strong> pause (never the average), and the heap after full GCs over time (= live data; rising = leak).</li>
+        <li><strong>Kinds:</strong> <code>Young</code>, <code>Full</code>, and G1's <code>Remark</code> / <code>Cleanup</code>. Lines saying <code>Concurrent</code> are not pauses.</li>
+        <li><strong>Logging:</strong> <code>-Xlog:gc*:file=gc.log:time,uptime,level,tags:filecount=5,filesize=10m</code>. On a running JVM: <code>jcmd &lt;pid&gt; VM.log output=gc.log what=gc</code>.</li>
+      </ul>
+
+      <h3>2.7 The JIT compiler (<a href="phase-2-memory-and-gc/chapter-03-gc-and-jit/lesson-06-the-jit-compiler.html">Lesson 06</a>)</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Tier</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td>0</td><td>interpreter (profiles basic counts)</td></tr>
+            <tr><td>1</td><td>C1, no profiling — trivial methods</td></tr>
+            <tr><td>2</td><td>C1, light profiling — C2 busy</td></tr>
+            <tr><td>3</td><td>C1, full profiling — the usual first compile</td></tr>
+            <tr><td>4</td><td>C2, profile-guided — hot code. Usual path <strong>0 → 3 → 4</strong></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <ul>
+        <li><strong>OSR:</strong> a long loop in a method called once is compiled via the back-edge counter and switched over mid-loop (<code>%</code> in <code>-XX:+PrintCompilation</code>).</li>
+        <li><strong>Inlining</strong> copies small or hot callees into callers, which unlocks every other optimisation. Small methods are free once hot. A <strong>megamorphic</strong> call site (3+ classes seen) blocks it.</li>
+        <li><strong>Escape analysis</strong> (C2, after inlining): a non-escaping object is scalar-replaced (never allocated) and its locks elided. Measured in the course: ≈24 bytes/call cold → ≈0 hot.</li>
+        <li><strong>Speculation + deoptimization:</strong> C2 bets on the profile; a lost bet makes the code &ldquo;made not entrant&rdquo; and falls back to the interpreter. <strong>Results never change.</strong> A tier 3 retirement is a replacement; a tier 4 retirement is a deoptimization.</li>
+        <li><strong>The first run is slow</strong> because of class loading, interpretation, profiling, and compilation in progress. Measure with <strong>JMH</strong>, never a cold stopwatch.</li>
+      </ul>
+
+      <h3>2.8 Seeing inside a live JVM (<a href="phase-3-observing/chapter-04-live-jvm-tools/lesson-07-seeing-inside-a-live-jvm.html">Lesson 07</a>)</h3>
+      <ul>
+        <li><strong>Find it:</strong> <code>jps -l</code> or <code>jcmd</code> → PID. <strong>Attach</strong> only on the same machine, as the same OS user (inside the container for containers).</li>
+        <li><strong>Thread states:</strong> <code>RUNNABLE</code>, <code>BLOCKED</code> (waiting for a monitor), <code>WAITING</code>, <code>TIMED_WAITING</code>. Frozen with the CPU idle → look for deadlocks (&ldquo;Found one Java-level deadlock&rdquo;). Take three dumps a few seconds apart.</li>
+        <li><strong>Class histogram</strong> = instances + <em>shallow</em> bytes per class. <strong>Two histograms minutes apart</strong> → the class that keeps growing is the suspect.</li>
+        <li><strong>Heap dump</strong> = every object and reference. <strong>Retained size</strong> points at the holder; <strong>path to GC roots</strong> names the field. It pauses the JVM, is about the size of the live heap, and <strong>contains secrets</strong>.</li>
+        <li><strong>Order:</strong> GC log → two histograms → one heap dump at a quiet moment → fix the removal rule → confirm with flat histograms.</li>
+      </ul>
+    </section>
+
+    <!-- ===================== SECTION 3 — FLAGS & COMMANDS ===================== -->
+    <section id="s3">
+      <h2><span class="sec-num">3</span> Flags and commands, all in one place</h2>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Flag / command</th><th>Does</th><th>Lesson</th></tr></thead>
+          <tbody>
+            <tr><td colspan="3"><strong>Sizing</strong></td></tr>
+            <tr><td><code>-Xmx</code> / <code>-Xms</code></td><td>maximum / initial heap</td><td>03</td></tr>
+            <tr><td><code>-Xmn</code></td><td>young generation size</td><td>04</td></tr>
+            <tr><td><code>-Xss</code></td><td>thread stack size — <strong>per thread</strong></td><td>03</td></tr>
+            <tr><td><code>-XX:MaxMetaspaceSize</code></td><td>cap Metaspace (unbounded by default)</td><td>03</td></tr>
+            <tr><td><code>-XX:MaxTenuringThreshold</code></td><td>promotion age (max 15)</td><td>04</td></tr>
+            <tr><td colspan="3"><strong>Choosing and tuning a collector</strong></td></tr>
+            <tr><td><code>-XX:+UseSerialGC</code> · <code>+UseParallelGC</code> · <code>+UseG1GC</code> · <code>+UseZGC</code></td><td>pick a collector (G1 is the default)</td><td>05</td></tr>
+            <tr><td><code>-XX:+ZGenerational</code></td><td>generational ZGC on Java 21 (default in later releases — verify)</td><td>05</td></tr>
+            <tr><td><code>-XX:MaxGCPauseMillis</code></td><td>G1 pause goal (a goal, not a guarantee)</td><td>05</td></tr>
+            <tr><td><code>-XX:+DisableExplicitGC</code></td><td>make <code>System.gc()</code> a no-op</td><td>04</td></tr>
+            <tr><td colspan="3"><strong>Logging and observing</strong></td></tr>
+            <tr><td><code>-Xlog:gc</code> · <code>-Xlog:gc*</code> · <code>-Xlog:gc:file=gc.log</code></td><td>GC logging (unified logging, Java 9+)</td><td>05</td></tr>
+            <tr><td><code>-Xlog:gc+age=trace</code></td><td>survivor age table each young GC</td><td>04</td></tr>
+            <tr><td><code>-verbose:class</code> · <code>-Xlog:class+load=info</code></td><td>one line per loaded class</td><td>02</td></tr>
+            <tr><td><code>-XX:+PrintCompilation</code></td><td>one line per compilation / retirement</td><td>06</td></tr>
+            <tr><td><code>-XX:+UnlockDiagnosticVMOptions -XX:+PrintInlining</code></td><td>inlining decisions (very verbose)</td><td>06</td></tr>
+            <tr><td><code>-XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=…</code></td><td>dump the heap at the moment of an OOM — always on in production</td><td>03, 07</td></tr>
+            <tr><td><code>-XX:+PrintFlagsFinal -version</code></td><td>every flag's real value on this JVM</td><td>06</td></tr>
+            <tr><td colspan="3"><strong>JIT experiments only</strong></td></tr>
+            <tr><td><code>-XX:-DoEscapeAnalysis</code></td><td>switch escape analysis off</td><td>06</td></tr>
+            <tr><td><code>-XX:TieredStopAtLevel=1</code></td><td>C1 only (no C2, no escape analysis)</td><td>06</td></tr>
+            <tr><td><code>-Xint</code></td><td>interpreter only</td><td>06</td></tr>
+            <tr><td colspan="3"><strong>Tools</strong></td></tr>
+            <tr><td><code>javap -c -p</code> · <code>-v</code></td><td>bytecode incl. private members · header and constant pool</td><td>01</td></tr>
+            <tr><td><code>jps -l</code></td><td>list JVMs and PIDs</td><td>07</td></tr>
+            <tr><td><code>jcmd &lt;pid&gt; help</code></td><td>what this JVM supports</td><td>07</td></tr>
+            <tr><td><code>jcmd &lt;pid&gt; VM.version</code> · <code>VM.flags</code> · <code>VM.command_line</code></td><td>which JVM, which flags</td><td>07</td></tr>
+            <tr><td><code>jcmd &lt;pid&gt; Thread.print</code> (= <code>jstack</code>)</td><td>thread dump</td><td>07</td></tr>
+            <tr><td><code>jcmd &lt;pid&gt; GC.class_histogram</code> (≈ <code>jmap -histo:live</code>)</td><td>instances / bytes per class (runs a full GC)</td><td>07</td></tr>
+            <tr><td><code>jcmd &lt;pid&gt; GC.heap_dump /full/path.hprof</code></td><td>heap dump (pause, big file, sensitive)</td><td>07</td></tr>
+            <tr><td><code>jcmd &lt;pid&gt; GC.heap_info</code> · <code>Compiler.codecache</code> · <code>JFR.start</code></td><td>generation sizes · code cache · Flight Recorder</td><td>04, 06, 07</td></tr>
+            <tr><td><code>jconsole</code> · VisualVM · Eclipse MAT</td><td>live graphs · monitoring and dumps · big-dump analysis</td><td>07</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ===================== SECTION 4 — NUMBERS ===================== -->
+    <section id="s4">
+      <h2><span class="sec-num">4</span> Numbers worth knowing</h2>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Number</th><th>Meaning</th><th>Status</th></tr></thead>
+          <tbody>
+            <tr><td><code>0xCAFEBABE</code></td><td>class file magic number</td><td>fixed</td></tr>
+            <tr><td>major − 44</td><td>Java release from class file version; 65 = Java 21, 61 = 17, 55 = 11, 52 = 8</td><td>fixed</td></tr>
+            <tr><td>65535</td><td>minor version meaning &ldquo;preview features&rdquo;</td><td>fixed</td></tr>
+            <tr><td>15</td><td>maximum tenuring threshold (age stored in 4 bits)</td><td>HotSpot</td></tr>
+            <tr><td>8 : 1 : 1</td><td>default Eden : S0 : S1 split (<code>SurvivorRatio=8</code>)</td><td>verify</td></tr>
+            <tr><td>200 ms</td><td>G1's default pause goal</td><td>verify</td></tr>
+            <tr><td>≈ ¼ of RAM</td><td>default max heap when <code>-Xmx</code> is unset — container limits apply in containers</td><td>verify</td></tr>
+            <tr><td>≈ 512 KB – 1 MB</td><td>typical default thread stack on 64-bit</td><td>machine-dependent</td></tr>
+            <tr><td>&lt; 2 CPUs or &lt; ≈1792 MB</td><td>JVM picks Serial automatically</td><td>verify</td></tr>
+            <tr><td>≈ hundreds / ≈ thousands</td><td>calls before tier 3 / tier 4 (≈200 / ≈5000)</td><td>verify</td></tr>
+            <tr><td>≈ 35 / ≈ 325 bytes</td><td>bytecode size inlined always / when hot</td><td>verify</td></tr>
+            <tr><td>8,000 bytes</td><td>methods larger than this are not JIT-compiled by default</td><td>verify</td></tr>
+            <tr><td>≈ 24 bytes</td><td>a small object with two <code>int</code>s (12-byte header + fields, 8-byte aligned)</td><td>JDK-dependent</td></tr>
+            <tr><td>½ a region</td><td>size at which G1 treats an object as humongous</td><td>HotSpot</td></tr>
+            <tr><td>Java 7 · 8 · 9 · 14</td><td>string pool to heap · PermGen removed (Metaspace) · G1 default + unified logging · CMS removed</td><td>history</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ===================== SECTION 5 — MYTHS ===================== -->
+    <section id="s5">
+      <h2><span class="sec-num">5</span> Myths vs facts</h2>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Myth</th><th>Fact</th></tr></thead>
+          <tbody>
+            <tr><td>&ldquo;Java passes objects by reference.&rdquo;</td><td>Java passes everything by value; for objects the value is a reference. A callee can change the object, never the caller's variable.</td></tr>
+            <tr><td>&ldquo;Java compiles to machine code.&rdquo;</td><td><code>javac</code> compiles to bytecode; the JIT compiles hot bytecode to machine code at run time.</td></tr>
+            <tr><td>&ldquo;Write once, run anywhere means any Java version.&rdquo;</td><td>It means any machine. An older JVM always refuses a newer class file.</td></tr>
+            <tr><td>&ldquo;Java can't leak memory — it has GC.&rdquo;</td><td>Anything still reachable is kept. Unbounded static collections leak.</td></tr>
+            <tr><td>&ldquo;Setting a variable to <code>null</code> frees memory.&rdquo;</td><td>It makes an object eligible; the collector reclaims it later, on its own schedule.</td></tr>
+            <tr><td>&ldquo;Call <code>System.gc()</code> to clean up.&rdquo;</td><td>A request, usually a full GC — an expensive pause. Never in application code.</td></tr>
+            <tr><td>&ldquo;Two objects pointing at each other are never collected.&rdquo;</td><td>Java traces from roots; unreachable cycles are garbage.</td></tr>
+            <tr><td>&ldquo;Creating objects is expensive — pool them.&rdquo;</td><td>Allocation is a pointer bump; non-escaping objects may never exist. Pooling often makes things worse.</td></tr>
+            <tr><td>&ldquo;Small methods are slow — merge them.&rdquo;</td><td>Hot small methods are inlined; the call disappears.</td></tr>
+            <tr><td>&ldquo;Average GC pause is what matters.&rdquo;</td><td>Users feel the maximum. Read the max and the full-GC count.</td></tr>
+            <tr><td>&ldquo;More heap fixes any OutOfMemoryError.&rdquo;</td><td>Not for Metaspace, native threads or leaks — for a leak, more heap only delays the crash.</td></tr>
+            <tr><td>&ldquo;<code>StackOverflowError</code> needs more <code>-Xmx</code>.&rdquo;</td><td>The stack is not the heap. Usually a missing base case; the stack flag is <code>-Xss</code>.</td></tr>
+            <tr><td>&ldquo;Changing a <code>public static final</code> constant updates all callers.&rdquo;</td><td>Compile-time constants are inlined into callers; recompile them.</td></tr>
+            <tr><td>&ldquo;An import loads a class.&rdquo;</td><td>Imports vanish at compile time; nothing loads until first real use.</td></tr>
+            <tr><td>&ldquo;A heap dump is just a debug file.&rdquo;</td><td>It contains every value in memory, passwords included. Treat it as sensitive data.</td></tr>
+            <tr><td>&ldquo;Every 'made not entrant' is a deoptimization.&rdquo;</td><td>At tier 3 it is usually replacement by tier 4; tier 4 retirements are deoptimizations.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ===================== SECTION 6 — INTERVIEW QUESTIONS ===================== -->
+    <section id="s6">
+      <h2><span class="sec-num">6</span> Interview questions</h2>
+
+      <p>Answer each one out loud first, then open it. A good answer names the mechanism, then the consequence.</p>
+
+      <h3>6.1 Bytecode and the class file</h3>
+
+      <details class="check">
+        <summary>What is the difference between the JDK, the JRE and the JVM?</summary>
+        <div class="answer-body">The JVM is the engine that runs bytecode and manages memory. The JRE is the JVM plus the standard library — enough to run programs. The JDK is the JRE plus developer tools such as <code>javac</code>, <code>javap</code> and <code>jcmd</code>. Developers install a JDK; modern Java no longer ships a separate JRE. <em>(L00)</em></div>
+      </details>
+
+      <details class="check">
+        <summary>What does &ldquo;write once, run anywhere&rdquo; really mean, and where does it break?</summary>
+        <div class="answer-body">The compiled class file — bytecode for an imaginary machine — runs unchanged on any machine with a JVM. It breaks across Java versions (an older JVM refuses newer class files), and around the edges: native libraries, hard-coded file paths, platform encodings, and timing-dependent concurrency bugs. <em>(L01)</em></div>
+      </details>
+
+      <details class="check">
+        <summary>Decode: <code>UnsupportedClassVersionError … class file version 65.0, this runtime only recognizes 61.0</code>.</summary>
+        <div class="answer-body">Subtract 44: the file was compiled for Java 21, the JVM running it is Java 17. Older JVMs always refuse newer files. The usual fix is to run on Java 21 or later; the alternative is to build with <code>--release 17</code> and actually test on 17. You can check a jar without running it: <code>javap -v</code> and read <code>major version</code>. <em>(L01)</em></div>
+      </details>
+
+      <details class="check">
+        <summary>Why use <code>--release</code> instead of <code>-source</code>/<code>-target</code>?</summary>
+        <div class="answer-body"><code>-source</code>/<code>-target</code> set the language level and class file version but still compile against the <em>current</em> JDK's library, so code can call a method that does not exist on the target release and fail at run time with <code>NoSuchMethodError</code>. <code>--release</code> also swaps in that release's API definitions, so the compiler catches it. <em>(L01)</em></div>
+      </details>
+
+      <details class="check">
+        <summary>What does <code>new Foo()</code> compile to, and why is there a <code>dup</code>?</summary>
+        <div class="answer-body"><code>new</code> allocates a blank object and pushes a reference; <code>dup</code> copies the reference; <code>invokespecial Foo.&lt;init&gt;</code> runs the constructor, consuming one copy. The <code>dup</code> leaves a reference on the operand stack to assign or return, because the constructor call consumes the original. <em>(L01)</em></div>
+      </details>
+
+      <details class="check">
+        <summary>Why does string concatenation compile to <code>invokedynamic</code>, and what else uses it?</summary>
+        <div class="answer-body">Since Java 9, <code>javac</code> emits one <code>invokedynamic</code> that asks a JDK helper (<code>makeConcatWithConstants</code>) to build an optimised routine the first time the line runs. The JDK can then improve concatenation without anyone recompiling. Lambdas use the same mechanism via <code>LambdaMetafactory</code>. <em>(L01)</em></div>
+      </details>
+
+      <details class="check">
+        <summary>Why is the JVM a stack machine rather than a register machine?</summary>
+        <div class="answer-body">Stack instructions need no register operands (<code>iadd</code> takes its inputs from the top of the operand stack), so bytecode is compact and makes no assumptions about how many registers the real chip has. Mapping the stack onto real registers is the JIT's job. <em>(L01)</em></div>
+      </details>
+
+      <h3>6.2 Class loading</h3>
+
+      <details class="check">
+        <summary>Name the built-in class loaders. Why does <code>String.class.getClassLoader()</code> return <code>null</code>?</summary>
+        <div class="answer-body">Bootstrap (loads <code>java.base</code>), platform (the rest of the JDK) and application (your class path), in a parent chain. The bootstrap loader is implemented inside the JVM and has no Java object, so <code>null</code> is how it is represented — not an error. Calling a method on that result is a guaranteed <code>NullPointerException</code>. <em>(L02)</em></div>
+      </details>
+
+      <details class="check">
+        <summary>What is parent delegation and why does it exist?</summary>
+        <div class="answer-body">A loader asks its parent before searching its own sources, so classes are found as high in the chain as possible. Three benefits follow. Core classes cannot be replaced: a fake <code>java.lang.String</code> on your class path is never reached. Each JDK class exists exactly once, so there is one <code>String</code> type. And &ldquo;not found&rdquo; means genuinely nowhere. It is a convention in <code>loadClass</code>; servlet containers and plugin systems deliberately invert it. <em>(L02)</em></div>
+      </details>
+
+      <details class="check">
+        <summary><code>ClassNotFoundException</code> versus <code>NoClassDefFoundError</code>?</summary>
+        <div class="answer-body"><code>ClassNotFoundException</code> (checked) comes from a lookup by name as text — <code>Class.forName</code>, a framework reading config — that found nothing: a name or class-path problem. <code>NoClassDefFoundError</code> (an Error) means compiled code refers to a class that is missing at run time: a packaging problem. <code>NoClassDefFoundError: Could not initialize class X</code> is different again: X is present, but its static initializer failed earlier. <em>(L02)</em></div>
+      </details>
+
+      <details class="check">
+        <summary>Exactly when is a class initialized?</summary>
+        <div class="answer-body">On first <code>new</code>, first call of a static method it declares, first use of a non-constant static field it declares, <code>Class.forName(name)</code>, when a subclass is initialized (parent first), or when it is the main class. Not by an import, <code>Foo.class</code>, <code>new Foo[n]</code>, reading a compile-time constant, <code>loadClass</code>, or reading a superclass's static field through a subclass name. <em>(L02)</em></div>
+      </details>
+
+      <details class="check">
+        <summary>A library changed <code>public static final String VERSION</code> from &ldquo;1.0&rdquo; to &ldquo;2.0&rdquo;, but the application still prints 1.0. Why?</summary>
+        <div class="answer-body">A <code>static final</code> primitive or <code>String</code> assigned a constant expression is a compile-time constant. <code>javac</code> copies its value into every caller's class file. The application holds its own copy and never reads the library's field. Recompile the callers — and in a public API, expose changeable values through a method. <em>(L02)</em></div>
+      </details>
+
+      <details class="check">
+        <summary>How can you get <code>ClassCastException: com.acme.Config cannot be cast to com.acme.Config</code>?</summary>
+        <div class="answer-body">A class's runtime identity is its name <em>plus</em> its defining loader. Two loaders — say the application loader and a plugin loader — each defined their own <code>Config</code>, giving two incompatible types. The message lists both loaders. Usually a shared jar is present in two places; fix it so only one loader can define the class. <em>(L02)</em></div>
+      </details>
+
+      <details class="check">
+        <summary>Is static initialization thread-safe? How is that used in practice?</summary>
+        <div class="answer-body">Yes. The JVM runs <code>&lt;clinit&gt;</code> exactly once per loader, under its own lock, and other threads block until it finishes. The initialization-on-demand holder idiom exploits this: a private nested <code>Holder</code> class holds a static instance, which is created lazily and thread-safely on first access with no <code>synchronized</code>. The flip side: if <code>&lt;clinit&gt;</code> throws, the class is unusable for the rest of the run. <em>(L02)</em></div>
+      </details>
+
+      <h3>6.3 Memory</h3>
+
+      <details class="check">
+        <summary>Stack versus heap?</summary>
+        <div class="answer-body">Each thread has its own fixed-size stack of frames, holding the locals, operand stack and return address of each in-progress call. It is reclaimed instantly when a method returns. The heap is shared by all threads and holds every object. It is reclaimed by the garbage collector, based on reachability. A local of object type sits on the stack and holds a reference to a heap object. <em>(L03)</em></div>
+      </details>
+
+      <details class="check">
+        <summary>Is Java pass-by-value or pass-by-reference? Then why did my object change?</summary>
+        <div class="answer-body">Always pass-by-value. For object types the value copied is the reference, so caller and callee point at the same heap object. Mutating that object through the copy is visible to the caller. Reassigning the parameter only changes the callee's own frame slot, so the caller never sees it. <em>(L03)</em></div>
+      </details>
+
+      <details class="check">
+        <summary>What replaced PermGen, and why?</summary>
+        <div class="answer-body">In Java 8, Metaspace replaced PermGen for class metadata. Metaspace lives in native memory and is unbounded by default, so the old small fixed limit (<code>OOM: PermGen space</code> after a few redeploys) went away. A class-loader leak now consumes machine memory instead; set <code>-XX:MaxMetaspaceSize</code> if you want it to fail visibly. (Interned strings had already moved to the heap in Java 7.) <em>(L03)</em></div>
+      </details>
+
+      <details class="check">
+        <summary><code>StackOverflowError</code> versus <code>OutOfMemoryError</code> — causes and fixes?</summary>
+        <div class="answer-body"><code>StackOverflowError</code>: one thread's fixed stack ran out of frames. It is usually runaway recursion — a missing base case, or two <code>toString</code>s calling each other — and the repeated lines in the trace are the diagnosis. Only legitimately deep recursion justifies raising <code>-Xss</code> (which applies per thread). <code>OutOfMemoryError</code>: a shared region is full. The words after the colon name the region, and so the investigation. <em>(L03)</em></div>
+      </details>
+
+      <details class="check">
+        <summary>Why can a JVM process use far more memory than <code>-Xmx</code>?</summary>
+        <div class="answer-body"><code>-Xmx</code> caps only the heap. On top of it come Metaspace, the code cache, one stack per thread, direct (off-heap) buffers, GC bookkeeping, and the JVM's own native memory. A process with many threads, or heavy NIO use, can exceed its heap by gigabytes. Size containers for all of it. <em>(L03)</em></div>
+      </details>
+
+      <details class="check">
+        <summary>Are local variables thread-safe? Are the objects they point to?</summary>
+        <div class="answer-body">The variables, yes: each lives in a frame on one thread's stack that no other thread can reach. The objects they reference, no: those are on the shared heap, and any thread holding a reference can modify them. &ldquo;Keep state local&rdquo; works only for primitives and objects that never escape the thread. <em>(L03)</em></div>
+      </details>
+
+      <h3>6.4 Garbage collection fundamentals</h3>
+
+      <details class="check">
+        <summary>How does the JVM decide an object is garbage? What are GC roots?</summary>
+        <div class="answer-body">An object is garbage when no chain of references from any GC root reaches it. The roots are the local variables in every live frame, static fields of loaded classes, running threads, and some JVM-internal references. Collectors mark everything reachable by tracing from the roots and reclaim the rest. <em>(L04)</em></div>
+      </details>
+
+      <details class="check">
+        <summary>Why doesn't Java use reference counting?</summary>
+        <div class="answer-body">Counting can never free cycles. Two objects pointing at each other keep each other's counts above zero forever, even when nothing else can reach them, and real data structures are full of cycles. Tracing from the roots ignores cycles entirely: an unreachable cycle is simply never reached. <em>(L04)</em></div>
+      </details>
+
+      <details class="check">
+        <summary>Can a Java program leak memory? Give examples.</summary>
+        <div class="answer-body">Yes. A Java leak is an object that is no longer needed but still reachable. Examples: a static map used as a cache without eviction; listeners registered and never removed; <code>ThreadLocal</code> values on pooled threads; a non-static inner class or lambda capturing <code>this</code> and registered long-term; class loaders kept alive across redeploys. <em>(L04)</em></div>
+      </details>
+
+      <details class="check">
+        <summary>Explain the generational hypothesis and how a minor GC works.</summary>
+        <div class="answer-body">Most objects die young, so new objects go into a small young generation (Eden plus two survivor spaces) that is collected often. When Eden fills, a minor GC pauses briefly and copies live objects from Eden and the occupied survivor space into the empty survivor space, adding one to each object's age. It then declares Eden and the old survivor empty. The cost is proportional to survivors; garbage is never visited. At the tenuring threshold, objects are promoted to the old generation instead. <em>(L04)</em></div>
+      </details>
+
+      <details class="check">
+        <summary>Minor, major and full GC — what is the difference?</summary>
+        <div class="answer-body">A minor GC collects only the young generation: frequent and cheap. A major GC collects the old generation: rare and expensive. A full GC collects the whole heap, often Metaspace too, and is usually the longest stop-the-world pause. People use the terms loosely, so say what you mean. <em>(L04)</em></div>
+      </details>
+
+      <details class="check">
+        <summary>What is premature promotion, and how do you fix it?</summary>
+        <div class="answer-body">Short-lived objects get pushed into the old generation too early, usually because the survivor space overflowed. The old generation then fills with garbage that only expensive collections reclaim. The tell-tale sign is an old generation that fills fast but drops back to the same level after full GCs. The fix is a larger young generation or survivor spaces — not a larger heap. <em>(L04)</em></div>
+      </details>
+
+      <details class="check">
+        <summary>If a minor GC only scans the young generation, how does it find old objects that point to young ones?</summary>
+        <div class="answer-body">Through the card table. The old generation is divided into small cards, and a write barrier — a little code the JIT adds to every reference store — marks a card dirty when an old object gets a reference. A minor GC scans only the dirty cards as extra roots. <em>(L04)</em></div>
+      </details>
+
+      <details class="check">
+        <summary>What is a weak reference, and what is the classic <code>WeakHashMap</code> trap?</summary>
+        <div class="answer-body">A <code>WeakReference</code> points at an object without keeping it alive. Once only weak references remain, the collector may reclaim the object and <code>get()</code> returns <code>null</code>. <code>WeakHashMap</code> holds its keys weakly, so entries vanish when keys become unreachable. The trap: if a value refers back to its own key, the map's strong reference to the value keeps the key reachable, and the entry never goes. <em>(L04)</em></div>
+      </details>
+
+      <details class="check">
+        <summary>Why shouldn't you use <code>finalize()</code>?</summary>
+        <div class="answer-body">It runs at an unpredictable time or never, slows the collector, can resurrect objects, and was deprecated for removal in Java 18 (JEP 421). Release resources with try-with-resources; <code>java.lang.ref.Cleaner</code> is a last-resort safety net. <em>(L04)</em></div>
+      </details>
+
+      <h3>6.5 Collectors and GC logs</h3>
+
+      <details class="check">
+        <summary>Throughput versus latency: which collector for a nightly batch job, and which for a low-latency API?</summary>
+        <div class="answer-body">Batch: Parallel. Only total run time matters, and with no concurrent work it has the highest throughput; long pauses hurt nobody. Low-latency API: ZGC for strict, sub-millisecond-scale pause needs or huge heaps; otherwise G1, the default, with its pause goal. Shorter pauses are always paid for with background CPU and barriers — that is, throughput. <em>(L05)</em></div>
+      </details>
+
+      <details class="check">
+        <summary>How does G1 work?</summary>
+        <div class="answer-body">The heap is split into equal regions, each with a role: Eden, survivor, old, humongous or free. When the old generation reaches a threshold, G1 marks it concurrently, finishing with short Remark and Cleanup pauses. It then runs mixed collections that evacuate the young regions plus the old regions with the most garbage (&ldquo;garbage first&rdquo;), sizing each collection set to the pause goal <code>-XX:MaxGCPauseMillis</code> (default 200 ms). Objects of at least half a region are humongous. If G1 falls behind, it falls back to a full GC. <em>(L05)</em></div>
+      </details>
+
+      <details class="check">
+        <summary>How does ZGC keep pauses under a millisecond, and what does it cost?</summary>
+        <div class="answer-body">It marks <em>and moves</em> objects concurrently. A load barrier on every reference read checks whether the referenced object has moved and fixes the reference before use, so the stop-the-world parts stay tiny and do not grow with heap size. The costs: the barrier on every read, background CPU, and the heap headroom it needs — so usually lower throughput than Parallel or G1. Java 21 added a generational mode (<code>-XX:+ZGenerational</code>). <em>(L05)</em></div>
+      </details>
+
+      <details class="check">
+        <summary>Read this line: <code>GC(14) Pause Young (Concurrent Start) (G1 Humongous Allocation) 48M-&gt;45M(64M) 3.112ms</code>.</summary>
+        <div class="answer-body">The 15th collection was a G1 young pause, triggered by allocating a humongous object, that also starts a concurrent marking cycle. Heap use went from 48 MB to 45 MB in a 64 MB committed heap: it freed almost nothing, so live data is close to filling the heap. The pause lasted 3.1 ms. Worth watching: a nearly full heap and frequent humongous allocations. <em>(L05)</em></div>
+      </details>
+
+      <details class="check">
+        <summary>Which numbers in a GC log matter most, and why not the average pause?</summary>
+        <div class="answer-body">The count of full GCs (ideally zero); the maximum pause (what the unluckiest request felt); and the heap after full GCs over time (live data — rising means a leak). An average spreads one long full GC across thousands of short pauses until it disappears. <em>(L05)</em></div>
+      </details>
+
+      <details class="check">
+        <summary>Which collector runs if you set none? Can it surprise you?</summary>
+        <div class="answer-body">G1 since Java 9 — unless the JVM judges the machine small (roughly fewer than 2 CPUs or less than about 1792 MB; verify), in which case it silently picks Serial. In a container it reads the container's limits, so a 1-CPU pod may run Serial while laptops run G1. Check the <code>Using …</code> line in the GC log, or set the collector explicitly. <em>(L05)</em></div>
+      </details>
+
+      <details class="check">
+        <summary>How do you enable GC logging on Java 21? On an already-running JVM?</summary>
+        <div class="answer-body">Start-up: <code>-Xlog:gc*:file=gc.log:time,uptime,level,tags:filecount=5,filesize=10m</code>, using unified logging (the old <code>-XX:+PrintGCDetails</code>/<code>-Xloggc</code> are pre-Java-9). Running JVM: <code>jcmd &lt;pid&gt; VM.log output=gc.log what=gc</code>. GC-level logging is cheap enough to leave on permanently. <em>(L05)</em></div>
+      </details>
+
+      <h3>6.6 The JIT</h3>
+
+      <details class="check">
+        <summary>Why is the first run of code slow and the tenth fast?</summary>
+        <div class="answer-body">At first, classes are being loaded and initialized, the code runs in the interpreter, then in C1 code that is still profiling, while C1 and C2 compile on background threads. Once C2 installs optimised code (and OSR switches running loops over), it runs at full speed. That settling-in period is warm-up, and it is why a cold timing measures the wrong thing. <em>(L01, L06)</em></div>
+      </details>
+
+      <details class="check">
+        <summary>Explain tiered compilation.</summary>
+        <div class="answer-body">Methods climb tiers as their call and loop counters cross thresholds: 0 (interpreter), then usually 3 (C1 with full profiling), then 4 (C2, optimised using that profile). Trivial methods go to tier 1 (C1, no profiling). Tier 2 is used when C2 is busy. C1 gives fast start-up and gathers the profile; C2 gives peak speed. <em>(L06)</em></div>
+      </details>
+
+      <details class="check">
+        <summary>What is on-stack replacement?</summary>
+        <div class="answer-body">Compiling a method while one of its loops is running, then transferring the loop's live state into the compiled code mid-loop. It is triggered by the back-edge counter, so a long loop in a method called only once — such as <code>main</code> — still gets compiled. Marked <code>%</code> in <code>-XX:+PrintCompilation</code>. <em>(L06)</em></div>
+      </details>
+
+      <details class="check">
+        <summary>Why is inlining called the mother of all optimisations? What blocks it?</summary>
+        <div class="answer-body">Copying a callee into its caller removes the call and lets the compiler see across the boundary, enabling constant folding, dead-code removal and escape analysis. It is blocked by megamorphic call sites (three or more receiver classes seen), very large methods, and cold call sites. Monomorphic and bimorphic sites are inlined behind cheap type checks. <em>(L06)</em></div>
+      </details>
+
+      <details class="check">
+        <summary>What is escape analysis? Does it mean allocation is free?</summary>
+        <div class="answer-body">After inlining, C2 checks whether each object can escape — be returned, stored in a field, passed to non-inlined code, or thrown. If not, it can scalar-replace the object (its fields become locals; no allocation) and elide locks on it. It is not universal: only C2 does it, only in hot code, and anything that escapes on any path keeps its allocation. So: short-lived local allocation is far cheaper than intuition says — measure before you pool. <em>(L06)</em></div>
+      </details>
+
+      <details class="check">
+        <summary>What is deoptimization? Is it safe?</summary>
+        <div class="answer-body">C2 compiles using speculative assumptions — a branch is never taken, a call site sees one class, only one implementation is loaded. When one breaks, the compiled code is made not entrant, running frames are converted back to interpreter frames, and the method later recompiles. It is completely safe: results never change, only speed dips briefly. <em>(L06)</em></div>
+      </details>
+
+      <details class="check">
+        <summary>How do you benchmark Java code properly?</summary>
+        <div class="answer-body">With JMH. It runs warm-up iterations before measuring, forks fresh JVMs so profiles do not leak between benchmarks, and provides a Blackhole that consumes results so the JIT cannot delete the work. A one-off <code>nanoTime</code> measurement mostly times the interpreter and the compiler. <em>(L01, L06)</em></div>
+      </details>
+
+      <details class="check">
+        <summary>Should I hand-inline small methods or pool short-lived objects for speed?</summary>
+        <div class="answer-body">Almost never. The JIT inlines hot small methods and may remove non-escaping allocations, so the &ldquo;optimisation&rdquo; only helps cold code that does not matter. Pooling can even hurt: pooled objects live long, get promoted, and cost the collector more. Write clear code and optimise what a profiler shows is hot. <em>(L06)</em></div>
+      </details>
+
+      <h3>6.7 Diagnosing a live JVM</h3>
+
+      <details class="check">
+        <summary>A service's memory grows steadily for days. How do you investigate, step by step?</summary>
+        <div class="answer-body">First, confirm it is the heap: does the GC log show the heap-after-full-GC level rising? Next, take two class histograms (<code>jcmd &lt;pid&gt; GC.class_histogram</code>) minutes apart and look for your own classes growing in step with load. Then take one heap dump at a quiet moment and open it in MAT or VisualVM: retained size points at the holder, and the path to GC roots names the field. Fix the removal rule, and confirm with flat histograms. Make sure <code>-XX:+HeapDumpOnOutOfMemoryError</code> is set for next time. <em>(L05, L07)</em></div>
+      </details>
+
+      <details class="check">
+        <summary>An application is frozen, the CPU is idle, nothing logs. What do you do?</summary>
+        <div class="answer-body">Take thread dumps (<code>jcmd &lt;pid&gt; Thread.print</code> or <code>jstack</code>), three of them a few seconds apart. Look for threads <code>BLOCKED</code> on each other's monitors; HotSpot prints &ldquo;Found one Java-level deadlock&rdquo; for simple cases. Also look for threads all waiting on one exhausted resource, such as a connection pool. A thread in the same frame in all three dumps is stuck. The usual deadlock fix is a consistent lock order. <em>(L07)</em></div>
+      </details>
+
+      <details class="check">
+        <summary>Shallow size versus retained size?</summary>
+        <div class="answer-body">Shallow size is the object itself — header and fields. Retained size is everything that would be freed if the object were collected: the object plus all objects reachable only through it. A leaking <code>HashMap</code> may be 48 bytes shallow and hundreds of megabytes retained. Histograms show shallow sizes; heap-dump tools compute retained sizes via the dominator tree. <em>(L07)</em></div>
+      </details>
+
+      <details class="check">
+        <summary>What are the risks of taking a heap dump in production?</summary>
+        <div class="answer-body">It pauses the JVM, for seconds on a large heap. It needs disk roughly equal to the live heap and can fill the disk. And it contains every value in memory — passwords, tokens, personal data — so it must be stored securely and deleted afterwards. Prefer histograms first, and dump during low traffic or from an instance removed from the load balancer. <em>(L07)</em></div>
+      </details>
+
+      <details class="check">
+        <summary><code>jcmd</code> cannot attach to the JVM. Why might that be?</summary>
+        <div class="answer-body">Attaching works only on the same machine, as the same operating-system user that started the JVM, and inside a container only from within that container (<code>docker exec</code>/<code>kubectl exec</code>). The process may also have exited, or been started with attaching disabled. <em>(L07)</em></div>
+      </details>
+
+      <details class="check">
+        <summary>Which <code>jcmd</code> commands would you reach for first?</summary>
+        <div class="answer-body"><code>VM.version</code> and <code>VM.flags</code> (what is running and how); <code>GC.heap_info</code> (generation sizes); <code>Thread.print</code> (threads); <code>GC.class_histogram</code> (what fills the heap); <code>GC.heap_dump</code> (full evidence, carefully); <code>VM.log</code> (switch on GC logging live); <code>JFR.start</code> (low-overhead recording). <code>jcmd &lt;pid&gt; help</code> lists everything. <em>(L07)</em></div>
+      </details>
+    </section>
+
+    <!-- ===================== SECTION 7 — PUZZLES ===================== -->
+    <section id="s7">
+      <h2><span class="sec-num">7</span> Predict-the-output puzzles</h2>
+
+      <p>Interviewers love these, because they test the model rather than the vocabulary. Predict before you open.</p>
+
+      <h4>Puzzle 1 — references</h4>
+      <pre class="code"><code><span class="kw">static void</span> <span class="fn">a</span>(<span class="ty">List</span>&lt;<span class="ty">String</span>&gt; l) { l.<span class="fn">add</span>(<span class="str">"x"</span>); }
+<span class="kw">static void</span> <span class="fn">b</span>(<span class="ty">List</span>&lt;<span class="ty">String</span>&gt; l) { l = <span class="kw">new</span> <span class="ty">ArrayList</span>&lt;&gt;(); l.<span class="fn">add</span>(<span class="str">"y"</span>); }
+<span class="kw">static void</span> <span class="fn">c</span>(<span class="kw">int</span> n) { n++; }
+
+<span class="ty">List</span>&lt;<span class="ty">String</span>&gt; list = <span class="kw">new</span> <span class="ty">ArrayList</span>&lt;&gt;();
+<span class="kw">int</span> n = <span class="num">1</span>;
+<span class="fn">a</span>(list); <span class="fn">b</span>(list); <span class="fn">c</span>(n);
+System.out.<span class="fn">println</span>(list + <span class="str">" "</span> + n);</code></pre>
+      <details class="answer">
+        <summary>Click to reveal the answer</summary>
+        <p><code>[x] 1</code>. <code>a</code> mutates the shared object through a copied reference. <code>b</code> repoints only its own parameter slot; the new list becomes garbage when <code>b</code> returns. <code>c</code> increments a copy of the number. <em>(L03)</em></p>
+      </details>
+
+      <h4>Puzzle 2 — class initialization</h4>
+      <pre class="code"><code><span class="kw">class</span> <span class="ty">P</span> { <span class="kw">static</span> { System.out.<span class="fn">println</span>(<span class="str">"P"</span>); } <span class="kw">static final int</span> K = <span class="num">1</span>; <span class="kw">static int</span> v = <span class="num">2</span>; }
+<span class="kw">class</span> <span class="ty">C</span> <span class="kw">extends</span> <span class="ty">P</span> { <span class="kw">static</span> { System.out.<span class="fn">println</span>(<span class="str">"C"</span>); } }
+
+System.out.<span class="fn">println</span>(C.K);
+<span class="ty">C</span>[] arr = <span class="kw">new</span> <span class="ty">C</span>[<span class="num">2</span>];
+System.out.<span class="fn">println</span>(C.v);
+System.out.<span class="fn">println</span>(<span class="kw">new</span> <span class="ty">C</span>() != <span class="kw">null</span>);</code></pre>
+      <details class="answer">
+        <summary>Click to reveal the answer</summary>
+        <p><code>1</code>, then <code>P</code>, <code>2</code>, then <code>C</code>, <code>true</code>. <code>K</code> is a compile-time constant, inlined, so nothing initializes. An array of <code>C</code> initializes nothing. <code>C.v</code> is declared in <code>P</code>, so only <code>P</code> initializes. <code>new C()</code> finally initializes <code>C</code> (P is already done). <em>(L02)</em></p>
+      </details>
+
+      <h4>Puzzle 3 — reachability</h4>
+      <pre class="code"><code><span class="kw">static</span> <span class="ty">List</span>&lt;<span class="ty">Object</span>&gt; cache = <span class="kw">new</span> <span class="ty">ArrayList</span>&lt;&gt;();
+
+<span class="ty">Object</span> a = <span class="kw">new</span> <span class="ty">Object</span>();            <span class="cmt">// A</span>
+<span class="ty">Object</span>[] pair = { <span class="kw">new</span> <span class="ty">Object</span>() };   <span class="cmt">// B (inside an array)</span>
+<span class="ty">Node</span> x = <span class="kw">new</span> <span class="ty">Node</span>(), y = <span class="kw">new</span> <span class="ty">Node</span>(); <span class="cmt">// C, D</span>
+x.next = y; y.next = x;
+cache.<span class="fn">add</span>(<span class="kw">new</span> <span class="ty">Object</span>());           <span class="cmt">// E</span>
+x = <span class="kw">null</span>; y = <span class="kw">null</span>; pair = <span class="kw">null</span>;
+<span class="cmt">// which of A-E are garbage here (a is still used below)?</span>
+System.out.<span class="fn">println</span>(a);</code></pre>
+      <details class="answer">
+        <summary>Click to reveal the answer</summary>
+        <p>Garbage: <strong>B</strong> (its array is unreachable), <strong>C and D</strong> (a cycle no root reaches). Reachable: <strong>A</strong> (a live local, used afterwards) and <strong>E</strong> (held by a static field — the shape of a leak). &ldquo;Garbage&rdquo; means eligible; collection happens at the next GC. <em>(L04)</em></p>
+      </details>
+
+      <h4>Puzzle 4 — the stack</h4>
+      <pre class="code"><code><span class="kw">class</span> <span class="ty">Team</span>   { <span class="ty">Player</span> captain; <span class="kw">public</span> <span class="ty">String</span> <span class="fn">toString</span>() { <span class="kw">return</span> <span class="str">"Team("</span> + captain + <span class="str">")"</span>; } }
+<span class="kw">class</span> <span class="ty">Player</span> { <span class="ty">Team</span> team;      <span class="kw">public</span> <span class="ty">String</span> <span class="fn">toString</span>() { <span class="kw">return</span> <span class="str">"Player("</span> + team + <span class="str">")"</span>; } }
+
+<span class="ty">Team</span> t = <span class="kw">new</span> <span class="ty">Team</span>(); <span class="ty">Player</span> p = <span class="kw">new</span> <span class="ty">Player</span>();
+t.captain = p; p.team = t;
+System.out.<span class="fn">println</span>(t);</code></pre>
+      <details class="answer">
+        <summary>Click to reveal the answer</summary>
+        <p><code>StackOverflowError</code>. The two <code>toString</code>s call each other forever, each call pushing a frame, until the thread's stack runs out. The trace repeats a two-method cycle — the diagnosis is in the pattern. Raising <code>-Xmx</code> does nothing; the fix is to break the cycle in <code>toString</code>. <em>(L03)</em></p>
+      </details>
+
+      <h4>Puzzle 5 — the JIT</h4>
+      <pre class="code"><code><span class="kw">static int</span> <span class="fn">len</span>(<span class="kw">int</span> x, <span class="kw">int</span> y) { <span class="ty">Point</span> p = <span class="kw">new</span> <span class="ty">Point</span>(x, y); <span class="kw">return</span> p.x() * p.x() + p.y() * p.y(); }
+<span class="cmt">// called 10 million times in a hot loop - how many Point objects end up on the heap?</span></code></pre>
+      <details class="answer">
+        <summary>Click to reveal the answer</summary>
+        <p>Typically: some during warm-up (interpreter and C1 really allocate), then roughly <strong>none</strong>. Once C2 compiles the hot loop with <code>len</code> inlined, escape analysis proves <code>p</code> never escapes and scalar-replaces it. With <code>-XX:-DoEscapeAnalysis</code>, all ten million are allocated. The result is identical either way. <em>(L06)</em></p>
+      </details>
+    </section>
+
+    <!-- ===================== SECTION 8 — SCENARIOS ===================== -->
+    <section id="s8">
+      <h2><span class="sec-num">8</span> Production scenarios — symptom to fix</h2>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Symptom</th><th>Likely cause</th><th>First evidence</th><th>Fix direction</th></tr></thead>
+          <tbody>
+            <tr><td><code>OOM: Java heap space</code> after hours</td><td>retention leak</td><td>heap after full GCs rising; two histograms</td><td>heap dump → path to roots → removal rule</td></tr>
+            <tr><td>Old gen fills fast, drops to same level after full GC</td><td>premature promotion</td><td>GC log, survivor overflow</td><td>larger young generation / survivors</td></tr>
+            <tr><td><code>OOM: Metaspace</code> after redeploys</td><td>class-loader leak</td><td>loaded-class count climbing; heap normal</td><td>find what keeps old loaders reachable</td></tr>
+            <tr><td><code>OOM: unable to create native thread</code></td><td>thread leak or OS limit</td><td>thread count in a thread dump</td><td>fix the leak; <strong>do not</strong> raise <code>-Xmx</code></td></tr>
+            <tr><td><code>StackOverflowError</code>, one line repeated</td><td>missing base case / mutual recursion</td><td>the repeating frames in the trace</td><td>fix the recursion; <code>-Xss</code> only for real depth</td></tr>
+            <tr><td>Multi-second pauses in a web service</td><td>Parallel/Serial full GCs, or G1 falling back to full</td><td>GC log: <code>Pause Full</code> count and max</td><td>G1/ZGC; fix leaks; check the <code>Using …</code> line</td></tr>
+            <tr><td>Slow first minutes after each deploy</td><td>JIT warm-up</td><td>latency improves over time; compilation activity</td><td>warm-up traffic, delayed readiness, gradual rollout</td></tr>
+            <tr><td>Sudden mid-run slowdown, no GC activity</td><td>deoptimization, or code cache full</td><td><code>PrintCompilation</code> tier-4 retirements; &ldquo;CodeCache is full&rdquo;</td><td>find what changed behaviour; size the code cache</td></tr>
+            <tr><td>Frozen, CPU idle</td><td>deadlock or exhausted pool</td><td>three thread dumps</td><td>consistent lock order; pool sizing/timeouts</td></tr>
+            <tr><td><code>NoClassDefFoundError: Could not initialize class</code></td><td>static initializer threw earlier</td><td>first <code>ExceptionInInitializerError</code> in the log</td><td>fix the cause; keep <code>&lt;clinit&gt;</code> trivial</td></tr>
+            <tr><td><code>ClassCastException: X cannot be cast to X</code></td><td>same class from two loaders</td><td>loader names in the message</td><td>remove the duplicate jar</td></tr>
+            <tr><td>Constant change not visible</td><td>compile-time constant inlined</td><td>callers' class files hold the old value</td><td>recompile callers; expose via a method</td></tr>
+            <tr><td>Fine on laptop, slow in a container</td><td>JVM picked Serial / small heap from container limits</td><td><code>Using Serial</code> in the log; <code>VM.flags</code></td><td>set collector and heap explicitly</td></tr>
+            <tr><td>RSS far above <code>-Xmx</code></td><td>Metaspace, thread stacks, direct buffers, code cache</td><td><code>jcmd</code> heap/Metaspace figures; thread count</td><td>size the container for all of it</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ===================== SECTION 9 — HOW TO ANSWER ===================== -->
+    <section id="s9">
+      <h2><span class="sec-num">9</span> How to answer well</h2>
+
+      <p>Strong answers to JVM questions follow the same four-step shape. Practise it on any question in Section 6:</p>
+
+      <ol>
+        <li><strong>Mechanism.</strong> Say what actually happens: &ldquo;the reference is copied into the callee's frame&rdquo;, &ldquo;C2 proves the object never escapes&rdquo;.</li>
+        <li><strong>Consequence.</strong> Say what that means for the code: &ldquo;so the caller sees mutations but not reassignment&rdquo;.</li>
+        <li><strong>Evidence.</strong> Say how you would check it on a real JVM: <code>javap -c</code>, a GC log line, <code>-XX:+PrintCompilation</code>, two histograms. This is what separates practitioners from people who have read about it.</li>
+        <li><strong>Trade-off.</strong> Say what it costs or where it stops being true: &ldquo;ZGC's short pauses cost throughput&rdquo;, &ldquo;escape analysis only helps hot code&rdquo;.</li>
+      </ol>
+
+      <div class="callout realworld">
+        <p><strong>Phrases to retire:</strong> &ldquo;Java is pass-by-reference for objects&rdquo; · &ldquo;GC means no memory leaks&rdquo; · &ldquo;<code>System.gc()</code> frees memory&rdquo; · &ldquo;Java is slow because it's interpreted&rdquo; · &ldquo;object creation is expensive&rdquo; · &ldquo;just give it more heap&rdquo;. <strong>Phrases that signal depth:</strong> &ldquo;reachable from a GC root&rdquo; · &ldquo;the heap after full GCs&rdquo; · &ldquo;the max pause, not the average&rdquo; · &ldquo;it depends on whether the object escapes&rdquo; · &ldquo;I'd take two histograms before a heap dump&rdquo; · &ldquo;let me check which collector is actually running&rdquo;.</p>
+      </div>
+
+      <div class="callout note">
+        <p>When you are unsure of a default or a flag name — and HotSpot defaults do change — say so, and say how you would verify it (<code>-XX:+PrintFlagsFinal</code>, <code>jcmd &lt;pid&gt; VM.flags</code>). Interviewers trust &ldquo;I'd verify that on the JDK we run&rdquo; far more than a confidently wrong number.</p>
+      </div>
+    </section>
+
+    <!-- ===================== SECTION 10 — CHECKLIST ===================== -->
+    <section id="s10">
+      <h2><span class="sec-num">10</span> Night-before checklist</h2>
+
+      <p>If you can say each of these in one breath, with the reason, you are ready.</p>
+
+      <ol>
+        <li>JDK = build + run, JRE = run, JVM = the engine.</li>
+        <li>Bytecode is portable; Java release = major version − 44; old JVMs refuse new class files.</li>
+        <li><code>new</code> = <code>new</code> / <code>dup</code> / <code>invokespecial</code>; string <code>+</code> and lambdas = <code>invokedynamic</code>.</li>
+        <li>Three loaders, parent delegation, identity = name + loader.</li>
+        <li>What triggers class initialization — and that constants are inlined.</li>
+        <li><code>ClassNotFoundException</code> = by name; <code>NoClassDefFoundError</code> = missing at run time; &ldquo;Could not initialize&rdquo; = earlier <code>&lt;clinit&gt;</code> failure.</li>
+        <li>Stack per thread, heap shared, Metaspace for classes, code cache for compiled code.</li>
+        <li>Java is pass-by-value; references are copied.</li>
+        <li>The words after the colon in an <code>OutOfMemoryError</code> decide the investigation.</li>
+        <li>Garbage = unreachable from GC roots; cycles do not matter.</li>
+        <li>Leak = reachable but unwanted; eligible ≠ collected; <code>System.gc()</code> is a request.</li>
+        <li>Most objects die young; minor GC copies survivors and wipes Eden; promotion at the threshold.</li>
+        <li>Minor / major / full; card table for old → young references.</li>
+        <li>Serial, Parallel, G1, ZGC — the throughput-versus-pause trade-off for each.</li>
+        <li>G1: regions, concurrent marking, mixed collections, pause goal, humongous, full-GC fallback.</li>
+        <li>Read a GC line; watch full-GC count, max pause, heap after full GCs.</li>
+        <li>Tiers 0 → 3 → 4, OSR, inlining, escape analysis, deoptimization.</li>
+        <li>Never trust a cold timing; JMH.</li>
+        <li><code>jcmd</code>: threads, histograms, heap dumps; three thread dumps; two histograms.</li>
+        <li>Retained size and path to GC roots; heap dumps are sensitive and pause the JVM.</li>
+      </ol>
+
+      <div class="nextup">
+        <p class="kicker">Keep going</p>
+        <h2>Revisit any lesson from the <a href="index.html">course map</a></h2>
+        <p>Every answer above links back to the lesson that explains it in depth, and <code>jvm-explorer</code> can demonstrate almost every one of them on your own machine. Rerunning an experiment the week before an interview is the best revision there is.</p>
+      </div>
+    </section>
+
+    <p class="position">Cheatsheet &amp; Interview Prep — Core Java Course 01: JVM Internals &amp; Memory Management</p>
+
+  </main>
+</div>
+</body>
+</html>
