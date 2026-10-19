@@ -332,6 +332,56 @@ pre.ascii::before { content: none; }
 .realworld { border-left-color: #15803d; background: #e6f3ea; }
 .realworld::before { content: "In the real world"; color: #10662f; }
 
+/* "what you will learn" box at the top of every lesson (tertiary indigo) */
+.learn { border-left-color: #4f46e5; background: #eceafd; margin-top: 0; }
+.learn::before { content: "What you will learn"; color: #3730a3; }
+
+/* ---- 5b. KEY WORDS LIST + QUICK RECAP (end of every lesson) --------------- */
+/* Key words: a two-column term / meaning list that stacks on phones. */
+dl.keywords {
+  display: grid;
+  grid-template-columns: minmax(9rem, 14rem) minmax(0, 1fr);
+  margin: 1rem 0;
+  border: 1px solid #e0d6c7;
+  border-radius: 10px;
+  overflow: hidden;
+  font-size: 0.95rem;
+}
+dl.keywords dt,
+dl.keywords dd {
+  margin: 0;
+  padding: 0.5rem 0.8rem;
+  border-bottom: 1px solid #ece2d3;
+}
+dl.keywords dt { font-weight: 700; color: #9a4416; background: #f7efe3; }
+dl.keywords dd { background: #fdfbf6; }
+dl.keywords dt:last-of-type,
+dl.keywords dd:last-of-type { border-bottom: none; }
+@media (max-width: 40rem) {
+  dl.keywords { grid-template-columns: minmax(0, 1fr); }
+  dl.keywords dt { border-bottom: none; padding-bottom: 0.1rem; }
+  dl.keywords dd { padding-top: 0.1rem; }
+  dl.keywords dt:last-of-type { border-bottom: none; }
+}
+
+/* Quick recap: short bullet list with teal tick marks. */
+ul.recap { list-style: none; padding-left: 0; }
+ul.recap li {
+  position: relative;
+  padding: 0.45rem 0.8rem 0.45rem 2.1rem;
+  margin: 0.4rem 0;
+  border-radius: 8px;
+  background: #e7f3f6;
+}
+ul.recap li::before {
+  content: "✔";
+  position: absolute;
+  left: 0.75rem;
+  top: 0.45rem;
+  color: #0e7490;
+  font-weight: 800;
+}
+
 /* ---- 6. TABLES: scrollable wrap, tinted header, zebra striping ------------- */
 .table-wrap {
   overflow-x: auto;
@@ -707,6 +757,15 @@ section:nth-of-type(n+4) { animation-delay: 0.18s; }
   .forlearning::before { color: #f09fe4; }
   .realworld { border-left-color: #5cc98a; background: #142519; }
   .realworld::before { color: #7bd6a1; }
+  .learn { border-left-color: #a5b4fc; background: #1c1b3a; }
+  .learn::before { color: #c7d2fe; }
+
+  dl.keywords { border-color: #3a332a; }
+  dl.keywords dt, dl.keywords dd { border-bottom-color: #2a251d; }
+  dl.keywords dt { color: #f0a35a; background: #2a251d; }
+  dl.keywords dd { background: #201c16; }
+  ul.recap li { background: #16262b; }
+  ul.recap li::before { color: #4cc4e0; }
 
   .table-wrap { border-color: #3a332a; }
   thead th { background: #2a251d; border-bottom-color: #3a332a; }

@@ -19,10 +19,11 @@
       <li><a href="#s4">4 · Applied to jvm-explorer</a></li>
       <li><a href="#s5">5 · In the wild</a></li>
       <li><a href="#s6">6 · Gotchas</a></li>
-      <li><a href="#s7">7 · Key takeaways</a></li>
-      <li><a href="#s8">8 · Challenge</a></li>
-      <li><a href="#s9">9 · Almanac update</a></li>
-      <li><a href="#s10">10 · What is next</a></li>
+      <li><a href="#s7">7 · Challenge</a></li>
+      <li><a href="#s8">8 · Almanac update</a></li>
+      <li><a href="#s9">9 · Key words</a></li>
+      <li><a href="#s10">10 · Quick recap</a></li>
+      <li><a href="#next">→ What is next</a></li>
     </ol>
     <nav class="toc-nav" aria-label="Course navigation">
       <a class="navcard" href="../chapter-02-memory-and-objects/lesson-04-object-lifecycle-and-gc.html">
@@ -51,15 +52,32 @@
       </p>
     </header>
 
+    <div class="callout learn">
+      <p>You will meet HotSpot's four main garbage collectors — Serial, Parallel, G1 and ZGC — and learn what each one gives up to be good at something else.</p>
+      <p>You will also learn to switch on GC logging, read a log line piece by piece, and run a project tool that sums up a whole log in ten lines.</p>
+    </div>
+
     <!-- ===================== SECTION 1 — THE PAIN ===================== -->
     <section id="s1">
       <h2><span class="sec-num">1</span> The pain</h2>
 
-      <p>A team copies a block of JVM flags from a well-known blog post into their startup script. It was good advice in 2015. On Java 21, the JVM prints one line as it starts: <code>Ignoring option UseConcMarkSweepGC; support was removed in 14.0</code>. Then it carries on. Nobody reads startup warnings. The collector that flag chose was removed from Java years ago. The flags that tune it do nothing. Nobody on the team can say which collector is really running, or why it was chosen.</p>
+      <h3>Pain 1: flags that silently do nothing</h3>
 
-      <p>Their monitoring dashboard says <strong>&ldquo;average GC pause: 6 ms&rdquo;</strong>, and everyone relaxes. Meanwhile, about one request in a few hundred takes almost a second. Every few minutes, one full collection freezes the whole application for 900 ms. An average spreads that one terrible pause across thousands of tiny ones, until you cannot see it. Users feel the worst case. Dashboards show the average.</p>
+      <p>A team copies a block of JVM <span class="term" tabindex="0" data-def="An option added to a command, starting with a dash, such as -Xmx512m.">flags</span> from a well-known blog post into their startup script. It was good advice in 2015. On Java 21, the JVM prints one line as it starts: <code>Ignoring option UseConcMarkSweepGC; support was removed in 14.0</code>. Then it carries on.</p>
 
-      <p>When someone finally turns on GC logging, the file is full of lines like <code>GC(14) Pause Young (Concurrent Start) (G1 Humongous Allocation) 48M-&gt;45M(64M) 3.112ms</code>. Every number in that line answers a question the team has argued about for weeks. And nobody can read it. By the end of this lesson, you will know what each collector gives up. You will read that line piece by piece. And you will run your own tool that turns a whole log into ten readable lines.</p>
+      <p>Nobody reads startup warnings. The collector that flag chose was removed from Java years ago. The flags that tune it do nothing. Nobody on the team can say which collector is really running, or why it was chosen.</p>
+
+      <h3>Pain 2: an average that hides the worst case</h3>
+
+      <p>Their <strong>dashboard</strong> (a screen of live charts about the running system) says <strong>&ldquo;average GC pause: 6 ms&rdquo;</strong>, and everyone relaxes. Meanwhile, about one request in a few hundred takes almost a second.</p>
+
+      <p>Here is why. Every few minutes, one full collection freezes the whole application for 900 ms. An average spreads that one terrible pause across thousands of tiny ones, until you cannot see it. Users feel the worst case. Dashboards show the average.</p>
+
+      <h3>Pain 3: a log nobody can read</h3>
+
+      <p>When someone finally turns on GC logging, the file is full of lines like <code>GC(14) Pause Young (Concurrent Start) (G1 Humongous Allocation) 48M-&gt;45M(64M) 3.112ms</code>. Every number in that line answers a question the team has argued about for weeks. And nobody can read it.</p>
+
+      <p>By the end of this lesson, you will know what each collector gives up. You will read that line piece by piece. And you will run your own tool that turns a whole log into ten readable lines.</p>
     </section>
 
     <!-- ===================== SECTION 2 — ANALOGY ===================== -->
@@ -91,6 +109,8 @@
         </table>
       </div>
 
+      <p>The new words in the right column are each explained in Section 3.</p>
+
       <p>No way of cleaning is best at everything. A banquet hall that serves set meals cares about meals per day. A café whose customers walk out after a 30-second wait cares about closures. Choosing a collector means deciding which kind of restaurant you are.</p>
     </section>
 
@@ -102,10 +122,14 @@
 
       <h3>3.1 Three goals that fight each other</h3>
 
-      <p><a href="../chapter-02-memory-and-objects/lesson-04-object-lifecycle-and-gc.html">Lesson 04</a> described <em>what</em> every collector must do. It must find the live objects by tracing from the roots, free the rest, and use generations to keep that cheap. Collectors differ in <em>how</em> they organise that work. We judge them on three measures:</p>
+      <p><a href="../chapter-02-memory-and-objects/lesson-04-object-lifecycle-and-gc.html">Lesson 04</a> described <em>what</em> every collector must do. It must find the live objects by tracing from the roots, free the rest, and use generations to keep that cheap. Collectors differ in <em>how</em> they organise that work.</p>
+
+      <p>One word first. Work done <strong>concurrently</strong> runs <em>at the same time as</em> your code, on other threads, instead of stopping your code. You will see this word all through the lesson.</p>
+
+      <p>We judge collectors on three measures:</p>
 
       <ul>
-        <li><strong>Throughput.</strong> Out of all the time the program runs, this is the share spent running <em>your</em> code instead of collecting. If an hour-long batch job spends 3 minutes in GC, its throughput is 95%. It matters most for batch work, where only the total time counts.</li>
+        <li><strong>Throughput.</strong> Out of all the time the program runs, this is the share spent running <em>your</em> code instead of collecting. For example, say an hour-long <strong>batch job</strong> (a program that works through a big pile of data and then stops) spends 3 minutes in GC. Then its throughput is 57 ÷ 60 = 95%. Throughput matters most for batch work, where only the total time counts.</li>
         <li><strong>Pause time</strong> (also called latency). This is how long the application stands still during a <span class="term" tabindex="0" data-def="A period during which every application thread is paused so the collector can work safely. The 'freeze' users notice.">stop-the-world pause</span>. Both the usual pause and, much more importantly, the <em>worst</em> one. It matters most for anything a person or another service is waiting on.</li>
         <li><strong>Footprint.</strong> This is how much extra memory and CPU the collector needs on top of your program. That includes spare heap to copy into, record-keeping tables, and threads doing GC work.</li>
       </ul>
@@ -120,21 +144,47 @@
 
       <h3>3.2 Serial: one thread, everything stopped</h3>
 
-      <p>The <strong>Serial</strong> collector (<code>-XX:+UseSerialGC</code>) is the textbook picture from Lesson 04, run by a single thread. Minor GCs copy live young objects between Eden and the survivor spaces. When the old generation needs collecting, Serial pauses everything and runs <em>mark-compact</em> over the whole heap. That means marking from the roots, then sliding every live object together. Every step is stop-the-world, and only one CPU does the work.</p>
+      <p>The <strong>Serial</strong> collector (<code>-XX:+UseSerialGC</code>) is the textbook picture from Lesson 04, run by a single thread:</p>
+      <ul>
+        <li>Minor GCs copy live young objects between Eden and the survivor spaces.</li>
+        <li>When the old generation needs collecting, Serial pauses everything and runs <strong>mark-compact</strong> over the whole heap. That means marking from the roots, then sliding every live object together.</li>
+      </ul>
+      <p>Every step is stop-the-world, and only one CPU does the work.</p>
 
-      <p>That sounds basic, and for a big server it is. But with a small heap and one CPU, Serial has the lowest extra cost of any collector. GC threads do not need to coordinate, and there is no background record-keeping. It is the right choice for small command-line tools and for containers limited to one CPU. In fact, the JVM picks it for you automatically on a machine it thinks is too small for anything else. Roughly, that means fewer than two processors, or less than about 1792 MB of memory. (That cut-off is HotSpot's own rule. Check it for your JDK.)</p>
+      <p>That sounds basic, and for a big server it is. But with a small heap and one CPU, Serial has the lowest extra cost of any collector. GC threads do not need to coordinate, and there is no background record-keeping.</p>
+
+      <p>It is the right choice for small command-line tools and for <span class="term" tabindex="0" data-def="A sealed box with its own memory and CPU limits that a service runs in, managed by tools like Docker or Kubernetes.">containers</span> limited to one CPU. In fact, the JVM picks it for you automatically on a machine it thinks is too small for anything else. Roughly, that means fewer than two processors, or less than about 1792 MB of memory. (That cut-off is HotSpot's own rule. Check it for your JDK.)</p>
 
       <h3>3.3 Parallel: the same algorithm, every CPU at once</h3>
 
-      <p>The <strong>Parallel</strong> collector (<code>-XX:+UseParallelGC</code>) runs exactly the same stop-the-world algorithms as Serial. But it splits the work across many GC threads. By default, there is about one thread per CPU core. A pause that takes Serial 400 ms might take Parallel 60 ms on eight cores. Nothing runs at the same time as your code. So there is no record-keeping on each reference at all. That is why Parallel usually gives the <strong>highest throughput</strong> of any HotSpot collector.</p>
+      <p>The <strong>Parallel</strong> collector (<code>-XX:+UseParallelGC</code>) runs exactly the same stop-the-world algorithms as Serial. But it splits the work across many GC threads. By default, there is about one thread per CPU core.</p>
+      <ul>
+        <li>A pause that takes Serial 400 ms might take Parallel 60 ms on eight cores.</li>
+        <li>Nothing runs at the same time as your code. So there is no record-keeping on each reference at all.</li>
+      </ul>
+      <p>That is why Parallel usually gives the <strong>highest throughput</strong> of any HotSpot collector.</p>
 
-      <p>Its weakness: every pause still stops everything. And full-collection pauses grow with the size of the old generation. A 32 GB heap can mean full pauses that last several seconds. Parallel was the default collector up to Java 8. It is still the right choice for batch jobs, data processing, and anything where the total run time matters and nobody waits on a single response.</p>
+      <p>Its weakness: every pause still stops everything. And full-collection pauses grow with the size of the old generation. A 32 GB heap can mean full pauses that last several seconds.</p>
+
+      <p>Parallel was the default collector up to Java 8. It is still the right choice for batch jobs, data processing, and anything where the total run time matters and nobody waits on a single response.</p>
 
       <h3>3.4 G1: regions, garbage first, and a pause goal</h3>
 
-      <p><strong>What goes wrong with one big old generation.</strong> With Serial and Parallel, collecting the old generation means marking and compacting <em>all</em> of it in one pause. A bigger heap means a longer pause, whatever the program needs. You cannot ask for &ldquo;at most 200 ms, please&rdquo;, because the work cannot be split into smaller pieces.</p>
+      <h4>What goes wrong with one big old generation</h4>
 
-      <p><strong>G1</strong> (&ldquo;Garbage First&rdquo;, <code>-XX:+UseG1GC</code>) has been the default since Java 9. It fixes this by changing the shape of the heap. It does not use a few big solid areas. It divides the heap into many blocks of equal size. Each block is usually between 1 and 32 MB, chosen from the heap size. Each block is called a <strong>region</strong>. At any moment, each region has one role: Eden, survivor, old, or free. The young and old generations of Lesson 04 still exist. But now each generation is a <em>group of regions</em>, spread across the heap. A region can change role after it is emptied.</p>
+      <p>With Serial and Parallel, collecting the old generation means marking and compacting <em>all</em> of it in one pause. A bigger heap means a longer pause, whatever the program needs. You cannot ask for &ldquo;at most 200 ms, please&rdquo;, because the work cannot be split into smaller pieces.</p>
+
+      <h4>G1's answer: regions</h4>
+
+      <p><strong>G1</strong> (&ldquo;Garbage First&rdquo;, <code>-XX:+UseG1GC</code>) has been the default since Java 9. It fixes this by changing the shape of the heap:</p>
+      <ul>
+        <li>It does not use a few big solid areas. It divides the heap into many blocks of equal size, usually between 1 and 32 MB each (chosen from the heap size). Each block is called a <strong>region</strong>.</li>
+        <li>At any moment, each region has one role: Eden, survivor, old, or free.</li>
+        <li>The young and old generations of Lesson 04 still exist. But now each generation is a <em>group of regions</em>, spread across the heap.</li>
+        <li>A region can change role after it is emptied.</li>
+      </ul>
+
+      <p>One more word helps with the diagram. To <strong>evacuate</strong> a region means to copy its live objects out to free regions, so the whole region becomes free.</p>
 
       <figure class="fig">
         <svg viewBox="0 0 720 290" role="img" aria-label="A G1 heap drawn as a grid of equal regions. Some are Eden, some survivor, many old, two adjacent regions hold one humongous object, and the rest are free. A few old regions holding mostly garbage are outlined as the collection set for the next mixed collection, together with all the young regions.">
@@ -196,24 +246,49 @@
 
       <ol>
         <li><strong>Concurrent marking.</strong> When the old generation gets full enough, G1 starts marking it <em>while your code keeps running</em>, using background threads. Your code may change references during the walk. To stay correct, every reference write gets a small extra step that records the old value. This is a <span class="term" tabindex="0" data-def="A small piece of code the JIT adds to every reference store, so the collector can keep its bookkeeping correct (for example, marking a card dirty).">write barrier</span>, like the card-table barrier from Lesson 04. Marking ends with two short stop-the-world pauses to finish up: <strong>Remark</strong> and <strong>Cleanup</strong>. You will see all of these in the log.</li>
-        <li><strong>Garbage first.</strong> Marking tells G1 how much garbage each old region holds. Then, during normal young collections, it also adds a few of the old regions with the most garbage. Copying the few live objects out of a mostly dead region frees almost the whole region, for very little work. A young collection that also includes old regions is called a <strong>mixed collection</strong>. The regions picked for one pause are its <strong>collection set</strong>.</li>
+        <li><strong>Garbage first.</strong> Marking tells G1 how much garbage each old region holds. Then, during normal young collections, it also adds a few of the old regions with the most garbage. Copying the few live objects out of a mostly dead region frees almost the whole region, for very little work.
+          <ul>
+            <li>A young collection that also includes old regions is called a <strong>mixed collection</strong>.</li>
+            <li>The regions picked for one pause are its <strong>collection set</strong>.</li>
+          </ul></li>
         <li><strong>A pause goal.</strong> The work comes in region-sized pieces. So G1 can choose how many pieces to take on in one pause. You set a goal with <code>-XX:MaxGCPauseMillis</code> (default 200 ms). G1 sizes the young generation and the collection set to try to meet it. It is a <em>goal</em>, not a promise.</li>
       </ol>
 
-      <p>Two more terms appear in G1 logs.</p>
+      <p>Two more terms appear in G1 logs:</p>
       <ul>
-        <li>An object that is at least half a region in size gets regions of its own, straight in the old generation. Copying it around would cost too much. Such an object is called <strong>humongous</strong>. Making one can itself start a collection. The log shows this as <code>G1 Humongous Allocation</code>.</li>
-        <li>Sometimes G1 falls behind: your code makes objects faster than concurrent marking and mixed collections can free space. Then G1 runs out of free regions to copy into. It falls back to a <strong>full GC</strong>: the whole heap, compacted, with everything stopped. In a healthy G1 application, full GCs should be rare or never happen. In the log, they are the first line to look for.</li>
+        <li><strong>Humongous objects.</strong> An object that is at least half a region in size gets regions of its own, straight in the old generation. Copying it around would cost too much. Such an object is called <strong>humongous</strong> (&ldquo;huge&rdquo;). Making one can itself start a collection. The log shows this as <code>G1 Humongous Allocation</code>.</li>
+        <li><strong>Falling back to a full GC.</strong> Sometimes G1 falls behind: your code makes objects faster than concurrent marking and mixed collections can free space. Then G1 runs out of free regions to copy into. It falls back to a <strong>full GC</strong>: the whole heap, compacted, with everything stopped. In a healthy G1 application, full GCs should be rare or never happen. In the log, they are the first line to look for.</li>
       </ul>
 
       <h3>3.5 ZGC: moving objects while your code runs</h3>
 
-      <p>G1 still copies objects inside stop-the-world pauses. That is where its remaining pause time goes. <strong>ZGC</strong> (<code>-XX:+UseZGC</code>, ready for production since Java 15) does even the copying <em>while your code runs</em>. That causes a hard problem. If the collector moves an object while your code is using it, your code may follow an old reference to where the object <em>used</em> to be.</p>
+      <h4>The problem ZGC solves</h4>
 
-      <p>ZGC solves this by checking <em>reads</em> instead. Every time your code loads a reference from a field, a tiny check runs. The JIT adds this check. It looks at a few spare bits inside the reference, which record whether the reference is up to date. If the object has moved, the check fixes the reference on the spot, before your code uses it. That small check on every reference read is called a <strong>load barrier</strong>. Nearly all the work happens while your code runs. So ZGC's pauses are usually well under a millisecond. And unlike every collector above, its pauses do not grow with the heap size. A 4 GB heap and a 4 TB heap pause for about the same time.</p>
+      <p>G1 still copies objects inside stop-the-world pauses. That is where its remaining pause time goes. <strong>ZGC</strong> (<code>-XX:+UseZGC</code>, ready for real-world use since Java 15) does even the copying <em>while your code runs</em>.</p>
+
+      <p>That causes a hard problem. If the collector moves an object while your code is using it, your code may follow an old reference to where the object <em>used</em> to be. That would be like following an old address to a house whose owner has moved.</p>
+
+      <h4>How ZGC solves it: the load barrier</h4>
+
+      <p>ZGC solves this by checking every <em>read</em>:</p>
+      <ol>
+        <li>Every time your code loads a reference from a field, a tiny check runs. The JIT adds this check.</li>
+        <li>The check looks at a few spare bits inside the reference. They record whether the reference is up to date.</li>
+        <li>If the object has moved, the check fixes the reference on the spot, before your code uses it.</li>
+      </ol>
+      <p>That small check on every reference read is called a <strong>load barrier</strong>. (A write barrier runs on stores. A load barrier runs on reads.)</p>
+
+      <p>Nearly all the work happens while your code runs. So ZGC's pauses are usually well under a millisecond. And unlike every collector above, its pauses do not grow with the heap size. A 4 GB heap and a 4 TB heap pause for about the same time.</p>
 
       <div class="callout note">
-        <p>The cost is real. The load barrier runs on every reference read. ZGC's background threads take CPU your code could have used. It needs spare heap to keep working while your code keeps making objects. So it usually gives <em>lower throughput</em> than Parallel or G1, and it wants more spare memory. A version detail to check on your JDK: Java 21 added a <em>generational</em> mode for ZGC (JEP 439). You switch it on with <code>-XX:+UseZGC -XX:+ZGenerational</code>. Later releases made generational the default. Another low-pause collector, <strong>Shenandoah</strong>, works in a similar way. It ships in OpenJDK builds such as Temurin.</p>
+        <p>The cost is real:</p>
+        <ul>
+          <li>The load barrier runs on every reference read.</li>
+          <li>ZGC's background threads take CPU your code could have used.</li>
+          <li>It needs spare heap to keep working while your code keeps making objects.</li>
+        </ul>
+        <p>So it usually gives <em>lower throughput</em> than Parallel or G1, and it wants more spare memory.</p>
+        <p>A version detail to check on your JDK: Java 21 added a <em>generational</em> mode for ZGC (JEP 439). You switch it on with <code>-XX:+UseZGC -XX:+ZGenerational</code>. Later releases made generational the default. Another low-pause collector, <strong>Shenandoah</strong>, works in a similar way. It ships in OpenJDK builds such as Temurin.</p>
       </div>
 
       <h3>3.6 The four side by side</h3>
@@ -286,9 +361,14 @@
         <div class="answer-body">Parallel. Only the total run time matters. Parallel has the highest throughput, because nothing runs alongside your code. There are no barriers and no background threads taking CPU. Its long pauses do no harm, because nobody is waiting on a single response. ZGC would make the job slower, in return for short pauses nobody would notice.</div>
       </details>
 
+      <details class="check">
+        <summary>What is the difference between a write barrier and a load barrier?</summary>
+        <div class="answer-body">Both are tiny pieces of code the JIT adds to your program. A write barrier runs every time your code <em>stores</em> a reference; G1 uses one to keep its marking and card table correct. A load barrier runs every time your code <em>reads</em> a reference; ZGC uses one to fix references to objects it has moved.</div>
+      </details>
+
       <h3>3.7 Switching on GC logging</h3>
 
-      <p>Since Java 9, all of the JVM's logging goes through one system with one flag, <code>-Xlog</code>. This system is called <strong>unified logging</strong>. Its general shape is:</p>
+      <p>Since Java 9, all of the JVM's logging goes through one system with one flag, <code>-Xlog</code>. This system is called <strong>unified logging</strong> (&ldquo;unified&rdquo; means everything is joined into one). Its general shape is four parts, separated by colons:</p>
 
       <pre class="ascii"><code>-Xlog:<span class="cmt">WHAT</span>:<span class="cmt">WHERE</span>:<span class="cmt">DECORATIONS</span>:<span class="cmt">OUTPUT-OPTIONS</span>
 
@@ -300,7 +380,7 @@
 
       <ul>
         <li><strong>WHAT</strong> is a list of <em>tags</em>. Tags are labels on log messages, such as <code>gc</code>, <code>gc+age</code> and <code>class+load</code> (Lesson 02). A <code>*</code> means &ldquo;this tag and every tag joined with it&rdquo;. You can add <code>=level</code> (<code>info</code>, <code>debug</code>, <code>trace</code>) to ask for more detail.</li>
-        <li><strong>WHERE</strong> is <code>stdout</code>, <code>stderr</code>, or <code>file=name</code>. A file keeps the log out of your program's own output. It also keeps it out of the way of anything that reads that output.</li>
+        <li><strong>WHERE</strong> is <code>stdout</code> (the program's normal output), <code>stderr</code> (its error output), or <code>file=name</code>. A file keeps the log out of your program's own output. It also keeps it out of the way of anything that reads that output.</li>
         <li><strong>DECORATIONS</strong> are the fields in brackets at the start of each line. The default is <code>uptime,level,tags</code>, which gives <code>[0.215s][info][gc]</code>.</li>
         <li><strong>OUTPUT-OPTIONS</strong> control file rotation (starting a new file when the old one is big enough). So a long-running service never fills its disk with one giant log.</li>
       </ul>
@@ -370,7 +450,9 @@
         <li>GC(3) is a full GC that the code asked for. It gives the most important number in the whole log. After a full collection, only 2 MB is in use. So the program's <strong>live data</strong> is about 2 MB (<a href="../chapter-02-memory-and-objects/lesson-04-object-lifecycle-and-gc.html">Lesson 04</a>).</li>
       </ul>
 
-      <p><strong>What goes wrong when you only look at averages.</strong> This log's five pauses average 4.4 ms. That is what a dashboard would show. But the full GC took 15.3 ms, three and a half times the average. In a real service, the same shape looks like &ldquo;average 6 ms&rdquo; hiding a 900 ms pause every few minutes. The cure is to always read three numbers together:</p>
+      <h4>What goes wrong when you only look at averages</h4>
+
+      <p>This log's five pauses add up to 22.2 ms, so they average 4.4 ms. That is what a dashboard would show. But the full GC took 15.3 ms, three and a half times the average. In a real service, the same shape looks like &ldquo;average 6 ms&rdquo; hiding a 900 ms pause every few minutes. The cure is to always read three numbers together:</p>
       <ul>
         <li>the <strong>count</strong> of each kind of pause (are full GCs happening at all?),</li>
         <li>the <strong>maximum</strong> pause (what the unluckiest user felt), and</li>
@@ -388,7 +470,7 @@
     <section id="s4">
       <h2><span class="sec-num">4</span> Applied to jvm-explorer</h2>
 
-      <p>The project gets a <code>gclog</code> package. It reads a GC log that the project itself made, and prints a summary of the numbers that matter. A small workload experiment makes the log.</p>
+      <p>The project gets a <code>gclog</code> package. It reads a GC log that the project itself made, and prints a summary of the numbers that matter. A small <strong>workload</strong> experiment (a program whose only job is to give the collector work to do) makes the log.</p>
 
       <h3>4.1 What happens, step by step</h3>
 
@@ -423,7 +505,9 @@
 
       <h3>4.3 The parser: one pattern, read piece by piece</h3>
 
-      <p>You could pull numbers out of the text by hand: split on spaces, strip brackets, guess positions. But that breaks the moment a cause has two words. Java has a small language for describing the <em>shape</em> of text and pulling named pieces out of it. It is called a <strong>regular expression</strong>. In Java, you use the <code>Pattern</code> and <code>Matcher</code> classes. The parser's whole job is done by one of them:</p>
+      <p>A <strong>parser</strong> is code that reads text and turns it into structured data. You could pull numbers out of the text by hand: split on spaces, strip brackets, guess positions. But that breaks the moment a cause has two words.</p>
+
+      <p>Java has a small language for describing the <em>shape</em> of text and pulling named pieces out of it. It is called a <strong>regular expression</strong> (&ldquo;regex&rdquo; for short). For example, the regex <code>\d+</code> means &ldquo;one or more digits&rdquo;, so it finds <code>25</code> in <code>25M</code>. In Java, you use the <code>Pattern</code> and <code>Matcher</code> classes. The parser's whole job is done by one pattern:</p>
 
       <pre class="code"><code><span class="kw">private static final</span> <span class="ty">Pattern</span> PAUSE_LINE = <span class="ty">Pattern</span>.<span class="fn">compile</span>(
         <span class="str">"\\[(?&lt;uptime&gt;\\d+\\.\\d+)s\\]"</span>                      <span class="cmt">// [0.215s]</span>
@@ -446,7 +530,15 @@
       </ul>
       <p>(Each backslash is written twice, because Java strings themselves use the backslash as a special character.)</p>
 
-      <p><strong>What goes wrong with the obvious pattern.</strong> The natural way to say &ldquo;a cause in brackets&rdquo; is: &ldquo;an open bracket, then anything except a close bracket, then a close bracket&rdquo;. Try that on <code>Pause Full (System.gc()) 30M-&gt;2M(64M)</code>. It stops at the first <code>)</code>, the one inside <code>gc()</code>. That leaves a stray <code>)</code> behind, and the whole line fails to match. Every full GC caused by <code>System.gc()</code> quietly disappears from the summary. The cure is the piece <code>(?:[^()]|\\(\\))*</code>. It means: inside a cause, accept any normal character <em>or</em> the exact pair <code>()</code>. A test checks this case, so it can never quietly break again.</p>
+      <h4>What goes wrong with the obvious pattern</h4>
+
+      <p>The natural way to say &ldquo;a cause in brackets&rdquo; is: &ldquo;an open bracket, then anything except a close bracket, then a close bracket&rdquo;. Try that on <code>Pause Full (System.gc()) 30M-&gt;2M(64M)</code>:</p>
+      <ol>
+        <li>It stops at the first <code>)</code>, the one inside <code>gc()</code>.</li>
+        <li>That leaves a stray <code>)</code> behind, so the whole line fails to match.</li>
+        <li>Every full GC caused by <code>System.gc()</code> quietly disappears from the summary.</li>
+      </ol>
+      <p>The cure is the piece <code>(?:[^()]|\\(\\))*</code>. It means: inside a cause, accept any normal character <em>or</em> the exact pair <code>()</code>. A test checks this case, so it can never quietly break again.</p>
 
       <h3>4.4 The summary</h3>
 
@@ -572,10 +664,20 @@ java -cp target/classes com.corejava.jvm.gclog.GcLogSummaryTool zgc.log</code></
     <section id="s5">
       <h2><span class="sec-num">5</span> In the wild</h2>
 
-      <p>You can turn on unified logging in a JVM that is <em>already running</em>, without a restart. You use the JDK's <code>jcmd</code> tool (Lesson 07 covers it). <code>jcmd &lt;pid&gt; VM.log output=gc.log what=gc</code> starts writing exactly the log this lesson reads, from that moment on. That is how engineers look into a production service that is misbehaving. They do not restart it, because a restart would lose the very state they want to see. (Check the exact option spelling with <code>jcmd &lt;pid&gt; help VM.log</code> on your JDK.)</p>
+      <p>You can turn on unified logging in a JVM that is <em>already running</em>, without a restart. You use the JDK's <code>jcmd</code> tool (Lesson 07 covers it). Every running program has a <strong>PID</strong> (process id), a number the operating system gives it. The command <code>jcmd &lt;pid&gt; VM.log output=gc.log what=gc</code> starts writing exactly the log this lesson reads, from that moment on.</p>
+
+      <p>That is how engineers look into a live service that is misbehaving. They do not restart it, because a restart would lose the very state they want to see. (Check the exact option spelling with <code>jcmd &lt;pid&gt; help VM.log</code> on your JDK.)</p>
 
       <div class="callout realworld">
-        <p>The most common collector surprise in production is one nobody chose. A service runs happily with G1 on developers' laptops. Then it is deployed into a container limited to one CPU and 1 GB of memory. The JVM reads the <em>container's</em> limits. It decides the machine is too small for G1, and quietly picks <strong>Serial</strong>. Pauses get longer and responses get slower, but nothing in the code changed. The first line of the GC log (<code>Using Serial</code>) answers it in a second. So does the first line of jvm-explorer's collector report. Teams that have been hurt by this set the collector on purpose in the container image. In interviews, &ldquo;how would you choose a collector?&rdquo; really asks two things. Do you know it is a choice between throughput and short pauses? And would you check the log before guessing?</p>
+        <p>The most common collector surprise on live systems is one nobody chose:</p>
+        <ol>
+          <li>A service runs happily with G1 on developers' laptops.</li>
+          <li>Then it is deployed into a container limited to one CPU and 1 GB of memory.</li>
+          <li>The JVM reads the <em>container's</em> limits. It decides the machine is too small for G1, and quietly picks <strong>Serial</strong>.</li>
+          <li>Pauses get longer and responses get slower, but nothing in the code changed.</li>
+        </ol>
+        <p>The first line of the GC log (<code>Using Serial</code>) answers it in a second. So does the first line of jvm-explorer's collector report. Teams that have been hurt by this choose the collector on purpose in the container's settings.</p>
+        <p>In job interviews, &ldquo;how would you choose a collector?&rdquo; really asks two things. Do you know it is a choice between throughput and short pauses? And would you check the log before guessing?</p>
       </div>
     </section>
 
@@ -587,25 +689,13 @@ java -cp target/classes com.corejava.jvm.gclog.GcLogSummaryTool zgc.log</code></
         <li><strong>Judging GC by its average pause.</strong> An average spreads one long full GC across thousands of short pauses until you cannot see it. But users feel the worst case. <em>Avoid it:</em> always read the count of full GCs and the maximum pause. The summary tool prints both.</li>
         <li><strong>Treating <code>-XX:MaxGCPauseMillis</code> as a promise.</strong> It is a goal that G1 tries to meet by sizing its work. Set it too low, and G1 shrinks the young generation until it collects all the time. That costs throughput. And it still misses the goal when the live data is too big. <em>Avoid it:</em> keep the default unless a log shows you need something else. Change it in small steps, while watching the log.</li>
         <li><strong>Not knowing which collector is really running.</strong> If you do not choose one, the JVM picks one by itself. Its choice depends on the machine or container it runs on. <em>Avoid it:</em> before you reason about any GC behaviour, read the <code>Using ...</code> line at the top of the log, or <code>GcStats</code>' collector names.</li>
-        <li><strong>Logging GC to the console in production.</strong> GC lines then get mixed into your application's own output, and into anything that reads it. Nothing rotates them either. <em>Avoid it:</em> log to a file with rotation (<code>file=gc.log</code> plus <code>filecount</code> and <code>filesize</code>). GC logging at the <code>gc</code> level is cheap enough to leave on all the time. It is the first thing you will want after a production problem.</li>
+        <li><strong>Logging GC to the console on a live system.</strong> GC lines then get mixed into your application's own output, and into anything that reads it. Nothing rotates them either. <em>Avoid it:</em> log to a file with rotation (<code>file=gc.log</code> plus <code>filecount</code> and <code>filesize</code>). GC logging at the <code>gc</code> level is cheap enough to leave on all the time. It is the first thing you will want after a problem on a live system.</li>
       </ul>
     </section>
 
-    <!-- ===================== SECTION 7 — TAKEAWAYS ===================== -->
+    <!-- ===================== SECTION 7 — CHALLENGE ===================== -->
     <section id="s7">
-      <h2><span class="sec-num">7</span> Key takeaways</h2>
-      <ul>
-        <li>Every collector trades throughput, pause time and footprint against each other. Shorter pauses mean doing GC work alongside your code, and that background work and its barriers cost CPU and throughput.</li>
-        <li>Serial and Parallel run Lesson 04's algorithms with everything stopped: Serial on one thread, Parallel on many. Serial has the lowest extra cost, Parallel has the highest throughput, and both have pauses that grow with the heap.</li>
-        <li>G1 has been the default since Java 9. It divides the heap into regions, marks the old generation while your code runs, and collects the regions with the most garbage first, in mixed collections sized to a pause goal. It falls back to a full GC only when it falls behind.</li>
-        <li>ZGC moves objects while your code runs, using a load barrier on every reference read. So its pauses stay under a millisecond whatever the heap size, at the cost of throughput and spare memory.</li>
-        <li>A GC log line from <code>-Xlog:gc</code> gives the uptime, collection number, pause kind, causes, heap before, after and committed, and pause length. Read three numbers first: the count of full GCs, the maximum pause, and the heap after full GCs over time.</li>
-      </ul>
-    </section>
-
-    <!-- ===================== SECTION 8 — CHALLENGE ===================== -->
-    <section id="s8">
-      <h2><span class="sec-num">8</span> Challenge</h2>
+      <h2><span class="sec-num">7</span> Challenge</h2>
 
       <p><strong>Part A — read a log.</strong> A service's GC log contains these lines:</p>
 
@@ -626,8 +716,8 @@ java -cp target/classes com.corejava.jvm.gclog.GcLogSummaryTool zgc.log</code></
 
       <p><strong>Part B — choose a collector</strong> for each of these, with one reason:</p>
       <ol type="a">
-        <li>a nightly ETL batch job on a 16-core machine,</li>
-        <li>a trading API whose contract says every response must come within 10 ms, with a 40 GB heap,</li>
+        <li>a nightly ETL batch job on a 16-core machine (ETL = Extract, Transform, Load: copying data from one system into another),</li>
+        <li>a trading service whose contract says every response must come within 10 ms, with a 40 GB heap,</li>
         <li>a command-line tool that runs for half a second in a container with one CPU.</li>
       </ol>
 
@@ -642,7 +732,12 @@ java -cp target/classes com.corejava.jvm.gclog.GcLogSummaryTool zgc.log</code></
 
         <p><strong>Part A (3).</strong> The heap after the full GCs is <strong>640 MB</strong>, then <strong>910 MB</strong>. The live data grew by 270 MB in about 70 seconds. Live data that rises after full collections is the sign of a <strong>leak</strong> (Lesson 04). Or, to be generous, it could be a cache that is still filling up and has not reached its steady size. The heap is committed at 1963 MB. If the trend continues, this service will hit <code>OutOfMemoryError</code> within a few minutes.</p>
 
-        <p><strong>Part A (4).</strong> First, find out why live data keeps growing. Take a heap dump (Lesson 07) and see what is holding the extra 270 MB. No collector setting fixes a leak. Second, once the live data is stable: Parallel is the wrong collector for a web service. Its full-GC pauses grow with the old generation, and multi-second freezes are exactly what users feel. Switch to G1 (the default, so just remove the flag). Or, if short responses are critical, switch to ZGC. Both give up a little throughput for short pauses. Changing the collector while leaving the leak in place only changes how the service dies.</p>
+        <p><strong>Part A (4).</strong> In order:</p>
+        <ol>
+          <li>First, find out why live data keeps growing. Take a heap dump (a snapshot of everything in memory, Lesson 07) and see what is holding the extra 270 MB. No collector setting fixes a leak.</li>
+          <li>Second, once the live data is stable: Parallel is the wrong collector for a web service. Its full-GC pauses grow with the old generation, and multi-second freezes are exactly what users feel. Switch to G1 (the default, so just remove the flag). Or, if short responses are critical, switch to ZGC. Both give up a little throughput for short pauses.</li>
+        </ol>
+        <p>Changing the collector while leaving the leak in place only changes how the service dies.</p>
 
         <p><strong>Part B.</strong></p>
         <ul>
@@ -651,14 +746,16 @@ java -cp target/classes com.corejava.jvm.gclog.GcLogSummaryTool zgc.log</code></
           <li>(c) <strong>Serial</strong>. The JVM will very likely pick it by itself here: one CPU, a tiny heap, a short run. A concurrent collector's background threads would fight the program for its only CPU.</li>
         </ul>
 
-        <p><strong>Part C.</strong> Predicted: the 32 MB run has <strong>more pauses</strong>. Eden is smaller, so it fills more often for the same 512 MB of garbage. The old generation is also under more pressure. So expect more concurrent cycles, and maybe extra full GCs. The <strong>live-data estimate should barely change</strong> (around 25 MB in both). Live data belongs to the program, not to the heap size. That is exactly why it is the number to read before choosing <code>-Xmx</code>. 25 MB of live data hardly fits in 32 MB. So you may even see the workload fail with <code>OutOfMemoryError</code>. If so, that perfectly shows what happens when a heap is smaller than its live data. Whatever your machine shows, it wins. Tell me what you saw.</p>
+        <p><strong>Part C.</strong> Predicted: the 32 MB run has <strong>more pauses</strong>. Eden is smaller, so it fills more often for the same 512 MB of garbage. The old generation is also under more pressure. So expect more concurrent cycles, and maybe extra full GCs.</p>
+        <p>The <strong>live-data estimate should barely change</strong> (around 25 MB in both). Live data belongs to the program, not to the heap size. That is exactly why it is the number to read before choosing <code>-Xmx</code>.</p>
+        <p>25 MB of live data hardly fits in 32 MB. So you may even see the workload fail with <code>OutOfMemoryError</code>. If so, that perfectly shows what happens when a heap is smaller than its live data. Whatever your machine shows, it wins. Tell me what you saw.</p>
       </details>
     </section>
 
-    <!-- ===================== SECTION 9 — ALMANAC ===================== -->
-    <section id="s9">
-      <h2><span class="sec-num">9</span> Almanac update</h2>
-      <p>Added to <code>almanac.md</code>:</p>
+    <!-- ===================== SECTION 8 — ALMANAC ===================== -->
+    <section id="s8">
+      <h2><span class="sec-num">8</span> Almanac update</h2>
+      <p>Added to <code>almanac.md</code>, the course cheat-sheet:</p>
       <ul>
         <li>The three goals (throughput, pause time, footprint), and why you must trade them against each other.</li>
         <li>The four collectors: their flags, how they work, how they pause, and when to use each.</li>
@@ -672,8 +769,63 @@ java -cp target/classes com.corejava.jvm.gclog.GcLogSummaryTool zgc.log</code></
       </ul>
     </section>
 
-    <!-- ===================== SECTION 10 — WHAT IS NEXT ===================== -->
+    <!-- ===================== SECTION 9 — KEY WORDS ===================== -->
+    <section id="s9">
+      <h2><span class="sec-num">9</span> Key words</h2>
+      <p>Every new term from this lesson, with a one-line meaning.</p>
+      <dl class="keywords">
+        <dt>Dashboard</dt><dd>A screen of live charts about a running system.</dd>
+        <dt>Concurrent</dt><dd>Running at the same time as your code, on other threads, instead of stopping it.</dd>
+        <dt>Batch job</dt><dd>A program that works through a big pile of data and then stops.</dd>
+        <dt>Throughput</dt><dd>The share of run time spent running your own code, not collecting. 3 min of GC in 1 hour = 95%.</dd>
+        <dt>Pause time (latency)</dt><dd>How long your code stands still during a pause — especially the worst one.</dd>
+        <dt>Footprint</dt><dd>The extra memory and CPU a collector needs on top of your program.</dd>
+        <dt>Serial collector</dt><dd><code>-XX:+UseSerialGC</code>: one GC thread, everything stopped. Lowest overhead on small machines.</dd>
+        <dt>Mark-compact</dt><dd>Marking live objects from the roots, then sliding them together.</dd>
+        <dt>Parallel collector</dt><dd><code>-XX:+UseParallelGC</code>: Serial's method on many threads. Highest throughput; pauses grow with the heap.</dd>
+        <dt>G1 (Garbage First)</dt><dd><code>-XX:+UseG1GC</code>, the default since Java 9. Regions, concurrent marking, garbage-first collection, a pause goal.</dd>
+        <dt>Region</dt><dd>One of G1's many equal-sized heap blocks (1–32 MB), each with a role: Eden, survivor, old, humongous or free.</dd>
+        <dt>Evacuate</dt><dd>Copy a region's live objects out, so the whole region becomes free.</dd>
+        <dt>Concurrent marking</dt><dd>Marking live objects on background threads while your code runs.</dd>
+        <dt>Remark / Cleanup</dt><dd>G1's two short pauses that finish a concurrent marking cycle.</dd>
+        <dt>Mixed collection</dt><dd>A G1 collection of all young regions plus a few of the old regions with the most garbage.</dd>
+        <dt>Collection set</dt><dd>The regions G1 picks to evacuate in one pause.</dd>
+        <dt><code>-XX:MaxGCPauseMillis</code></dt><dd>G1's pause-time goal (default 200 ms). A goal, not a promise.</dd>
+        <dt>Humongous object</dt><dd>In G1, an object at least half a region in size. It gets whole regions of its own.</dd>
+        <dt>ZGC</dt><dd><code>-XX:+UseZGC</code>: marks and moves objects concurrently, so pauses stay under a millisecond.</dd>
+        <dt>Load barrier</dt><dd>A tiny check on every reference read. ZGC uses it to fix references to moved objects.</dd>
+        <dt>Shenandoah</dt><dd>Another low-pause collector that moves objects concurrently.</dd>
+        <dt>CMS</dt><dd>An old collector, removed in Java 14. Its flags are now ignored with a warning.</dd>
+        <dt>Unified logging (<code>-Xlog</code>)</dt><dd>The JVM's single logging system since Java 9, e.g. <code>-Xlog:gc:file=gc.log</code>.</dd>
+        <dt>Log tag / level / decoration</dt><dd>A tag labels a message's subject (<code>gc</code>); the level is its detail (<code>info</code>, <code>debug</code>, <code>trace</code>); decorations are the bracketed fields at the start.</dd>
+        <dt><code>stdout</code> / <code>stderr</code></dt><dd>A program's normal output and its error output.</dd>
+        <dt>Log rotation</dt><dd>Starting a new log file when the current one is big enough, so logs never fill the disk.</dd>
+        <dt>Pause line</dt><dd>One GC log line for one pause: uptime, <code>GC(n)</code>, pause kind, causes, heap before → after (committed), duration.</dd>
+        <dt>GC cause</dt><dd>The bracketed reason a collection started, e.g. <code>Allocation Failure</code> or <code>System.gc()</code>.</dd>
+        <dt>Live data</dt><dd>How much the heap holds right after a full GC — what the program really still uses.</dd>
+        <dt>Workload</dt><dd>A program whose only job is to give the system work to do.</dd>
+        <dt>Parser</dt><dd>Code that reads text and turns it into structured data.</dd>
+        <dt>Regular expression (regex)</dt><dd>A small language for describing the shape of text, used with Java's <code>Pattern</code> and <code>Matcher</code>.</dd>
+        <dt><code>@TempDir</code></dt><dd>A JUnit feature that gives a test a fresh empty folder, deleted afterwards.</dd>
+        <dt>PID</dt><dd>The number the operating system gives each running program.</dd>
+        <dt>ETL</dt><dd>Extract, Transform, Load: copying data from one system into another.</dd>
+      </dl>
+    </section>
+
+    <!-- ===================== SECTION 10 — QUICK RECAP ===================== -->
     <section id="s10">
+      <h2><span class="sec-num">10</span> Quick recap</h2>
+      <ul class="recap">
+        <li>Every collector trades throughput, pause time and footprint against each other. Shorter pauses mean doing work concurrently, and that background work costs CPU and throughput.</li>
+        <li>Serial (one thread) and Parallel (many threads) stop everything to collect. Serial has the lowest overhead, Parallel the highest throughput, and both have pauses that grow with the heap.</li>
+        <li>G1, the default since Java 9, splits the heap into regions, marks concurrently, and collects the regions with the most garbage first, sized to a pause goal. It falls back to a full GC only when it falls behind.</li>
+        <li>ZGC moves objects while your code runs, using a load barrier on every reference read. Its pauses stay under a millisecond at any heap size, at a cost in throughput and spare memory.</li>
+        <li>Turn on logging with <code>-Xlog:gc:file=gc.log</code>. Read three numbers first: how many full GCs, the longest pause, and the heap after full GCs over time.</li>
+      </ul>
+    </section>
+
+    <!-- ===================== WHAT IS NEXT ===================== -->
+    <section id="next">
       <div class="nextup">
         <p class="kicker">What is next</p>
         <h2><a href="lesson-06-the-jit-compiler.html">Lesson 06 — The JIT compiler</a></h2>

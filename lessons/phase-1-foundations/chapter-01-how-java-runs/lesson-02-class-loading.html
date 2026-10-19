@@ -19,10 +19,11 @@
       <li><a href="#s4">4 · Applied to jvm-explorer</a></li>
       <li><a href="#s5">5 · In the wild</a></li>
       <li><a href="#s6">6 · Gotchas</a></li>
-      <li><a href="#s7">7 · Key takeaways</a></li>
-      <li><a href="#s8">8 · Challenge</a></li>
-      <li><a href="#s9">9 · Almanac update</a></li>
-      <li><a href="#s10">10 · What is next</a></li>
+      <li><a href="#s7">7 · Challenge</a></li>
+      <li><a href="#s8">8 · Almanac update</a></li>
+      <li><a href="#s9">9 · Key words</a></li>
+      <li><a href="#s10">10 · Quick recap</a></li>
+      <li><a href="#next">→ What is next</a></li>
     </ol>
     <nav class="toc-nav" aria-label="Course navigation">
       <a class="navcard" href="lesson-01-how-java-runs.html">
@@ -51,6 +52,11 @@
       </p>
     </header>
 
+    <div class="callout learn">
+      <p>You will learn who finds your <code>.class</code> files, in what order they search, and why a fake copy of a core Java class can never sneak in.</p>
+      <p>You will also learn the exact moment your <code>static</code> code runs. That one rule explains three confusing errors and a value that &ldquo;refuses&rdquo; to update.</p>
+    </div>
+
     <!-- ===================== SECTION 1 — THE PAIN ===================== -->
     <section id="s1">
       <h2><span class="sec-num">1</span> The pain</h2>
@@ -61,20 +67,44 @@
 
       <p>Something found that file. Something decided <em>where</em> to look, in <em>what order</em>, and <em>at what moment</em>. That something is the part of the JVM this lesson is about. Until you know how it works, three of Java's most common failures make no sense at all.</p>
 
-      <p><strong>The first pain is two errors that look the same but mean opposite things.</strong> One program crashes with <code>ClassNotFoundException</code>. A colleague's program crashes with <code>NoClassDefFoundError</code>. Both say a class is missing. Both point at the same jar. But the fixes are different. It gets worse. There is a third form: <code>NoClassDefFoundError: Could not initialize class com.acme.Config</code>. It is thrown for a class that is <em>sitting right there on the class path</em>. The file is present and readable. The real cause happened earlier, in a different thread, with a different exception. That message has already scrolled off the screen. People restart the server and hope.</p>
+      <h3>Pain 1: two errors that look the same but mean different things</h3>
 
-      <p><strong>The second pain is old values that will not update, with no cache anywhere.</strong> A team ships a shared library with <code>public static final String API_VERSION = "1.0";</code>. Six months later they change it to <code>"2.0"</code>. They rebuild the library, drop in the new jar, and restart everything. The application still logs <code>1.0</code>. Not sometimes. Every time. There is no cache and no old build folder. The old value is <em>actually stored inside the application's own bytecode</em>. Only the rules of class loading explain why, and what to do about it.</p>
+      <p>One program crashes with <code>ClassNotFoundException</code>. A colleague's program crashes with <code>NoClassDefFoundError</code>. Both say a class is missing. Both point at the same jar (the zip file of classes from <a href="lesson-01-how-java-runs.html">Lesson 01</a>). But the fixes are different.</p>
 
-      <p><strong>The third pain is the one that makes people doubt their eyesight.</strong> A plugin-based application throws:</p>
+      <p>It gets worse. There is a third form: <code>NoClassDefFoundError: Could not initialize class com.acme.Config</code>. It is thrown for a class that is <em>sitting right there on the class path</em>. The file is present and readable.</p>
+
+      <p>The real cause happened earlier. It happened in a different <span class="term" tabindex="0" data-def="One worker inside a running program, carrying out instructions in order. A program can have many at once.">thread</span> (worker), with a different error. That first message has already scrolled off the screen. People restart the server and hope.</p>
+
+      <h3>Pain 2: an old value that will not update</h3>
+
+      <p>A team ships a shared library with <code>public static final String API_VERSION = "1.0";</code>. Six months later they change it to <code>"2.0"</code>. They rebuild the library, drop in the new jar, and restart everything.</p>
+
+      <p>The application still prints <code>1.0</code>. Not sometimes. Every time. There is no cache (no saved copy anywhere) and no old build folder. The old value is <em>actually stored inside the application's own bytecode</em>. Only the rules of class loading explain why, and what to do about it.</p>
+
+      <h3>Pain 3: &ldquo;Config cannot be cast to Config&rdquo;</h3>
+
+      <p>This is the one that makes people doubt their eyesight. A <strong>plugin</strong> is an add-on that a program loads while running, like an extension in a web browser. A plugin-based application throws:</p>
 
       <pre class="terminal"><code>java.lang.ClassCastException: class com.acme.Config cannot be cast to
         class com.acme.Config (com.acme.Config is in unnamed module of loader
         'app'; com.acme.Config is in unnamed module of loader
         org.acme.PluginLoader @4f3f5b24)</code></pre>
 
-      <p>The same name is on both sides. It is not a typo. It is not a packaging problem or a generics mistake. To understand that message, you need one fact that is almost never taught early enough: <strong>while a program runs, a class is known by its name <em>plus</em> the loader that defined it.</strong> Two loaders and one name give you two truly different types. You cannot assign one to the other.</p>
+      <p>The same name is on both sides. It is not a typo. It is not a packaging problem.</p>
 
-      <p>Under all three pains is a timing question you have probably never asked out loud. When does a <code>static</code> block run? When the JVM starts? When the class is first mentioned? When the first object is created? The answer is exact, written down in the rules, and surprising. It decides whether your settings load before or after the code that needs them. By the end of this lesson, your project will print the chain of loaders for any class. A log will also show you, line by line, which classes have been set up and which have not been touched yet.</p>
+      <p>To understand that message, you need one fact that is almost never taught early enough: <strong>while a program runs, a class is known by its name <em>plus</em> the loader that defined it.</strong> Two loaders and one name give you two truly different types. You cannot assign one to the other. Section 3.6 explains this fully.</p>
+
+      <h3>The question under all three</h3>
+
+      <p>Under all three pains is a timing question you have probably never asked out loud. When does a <code>static</code> block run?</p>
+      <ul>
+        <li>When the JVM starts?</li>
+        <li>When the class is first mentioned?</li>
+        <li>When the first object is created?</li>
+      </ul>
+      <p>The answer is exact, written down in the rules, and surprising. It decides whether your settings load before or after the code that needs them.</p>
+
+      <p>By the end of this lesson, your project will print the chain of loaders for any class. A log will also show you, line by line, which classes have been set up and which have not been touched yet.</p>
     </section>
 
     <!-- ===================== SECTION 2 — ANALOGY ===================== -->
@@ -83,9 +113,17 @@
 
       <p>Picture a library with three librarians, each above the next. A <strong>junior</strong> works at the front desk. A <strong>senior</strong> works in the back office. The <strong>head librarian</strong> is the only one with the key to the rare-books vault.</p>
 
-      <p>You ask the junior for <em>Hamlet</em>. She does not go looking. She turns around and asks the senior. He does not go looking either. He asks the head librarian. The head librarian checks the vault, finds the real <em>Hamlet</em>, and passes it back down the chain to you. The senior checks his own shelves only if the head librarian says “not in the vault”. The junior checks hers only if the senior also finds nothing. If all three fail, you get a clear answer: <em>we do not have that book.</em></p>
+      <p>You ask the junior for <em>Hamlet</em>. Here is what happens:</p>
+      <ol>
+        <li>The junior does not go looking. She turns around and asks the senior.</li>
+        <li>The senior does not go looking either. He asks the head librarian.</li>
+        <li>The head librarian checks the vault. If she finds the real <em>Hamlet</em>, it is passed back down the chain to you.</li>
+        <li>Only if the head librarian says &ldquo;not in the vault&rdquo; does the senior check his own shelves.</li>
+        <li>Only if the senior also finds nothing does the junior check hers.</li>
+        <li>If all three fail, you get a clear answer: <em>we do not have that book.</em></li>
+      </ol>
 
-      <p>Now the reason for the rule, which is the whole point. Suppose someone slipped a <em>fake Hamlet</em> onto the junior's front-desk shelf. It is a copy with the ending rewritten. With this system, nobody ever reaches it. The real copy is found first, in the vault, every single time. Nobody has to watch for the fake, spot it, or block it. The way the system works means <em>nobody can ever reach it</em>.</p>
+      <p>Now the reason for the rule, which is the whole point. Suppose someone slipped a <em>fake Hamlet</em> onto the junior's front-desk shelf. It is a copy with the ending rewritten. With this system, the real copy is found first, in the vault, every single time. Nobody has to watch for the fake, spot it, or block it. The way the system works means <em>nobody can ever reach it</em>.</p>
 
       <div class="table-wrap">
         <table>
@@ -103,6 +141,8 @@
           </tbody>
         </table>
       </div>
+
+      <p>Don't worry about the new words in the right column yet. Section 3 explains each one.</p>
 
       <p>Two more details of the analogy match exactly. Both matter later.</p>
 
@@ -137,13 +177,17 @@
         <li>most important: that all of the above has been <em>checked</em> and is safe to run.</li>
       </ul>
 
-      <p>Turning bytes on disk into that live thing is what we mean by loading a class. This raises a question the file itself cannot answer. Given the name <code>com.acme.Config</code>, <em>where do the bytes come from?</em> A folder? A jar? The network? A program that makes them up on the spot? Java chose not to fix any one answer. It gave the job to a normal Java object instead.</p>
+      <p>Turning bytes on disk into that live thing is what we mean by <strong>loading a class</strong>.</p>
+
+      <p>This raises a question the file itself cannot answer. Given the name <code>com.acme.Config</code>, <em>where do the bytes come from?</em> A folder? A jar? The network? A program that makes them up on the spot? Java chose not to fix any one answer. It gave the job to a normal Java object instead.</p>
 
       <h3>3.2 The class loader: an object with one job</h3>
 
-      <p>A <strong>class loader</strong> is a Java object with one job: <em>you give it a class's name as text, and it gives you back a loaded class.</em> That is all it promises. It is not a keyword, a JVM flag, or a step of the build. It is an object of a class that extends <code>java.lang.ClassLoader</code>. It sits in memory next to your own objects. You can hold a reference to it and ask it questions.</p>
+      <p>A <strong>class loader</strong> is a Java object with one job: <em>you give it a class's name as text, and it gives you back a loaded class.</em> That is all it promises.</p>
 
-      <p>Why build it that way? Because “where do class bytes come from?” has many good answers. Fixing just one would have frozen Java as it was in 1995. Because the loader is a normal object, the answer can be any of these:</p>
+      <p>It is not a keyword, a JVM setting, or a step of the build. It is an ordinary object of a class that extends <code>java.lang.ClassLoader</code>. It sits in memory next to your own objects. You can hold a reference to it and ask it questions.</p>
+
+      <p>Why build it that way? Because &ldquo;where do class bytes come from?&rdquo; has many good answers. Fixing just one would have frozen Java as it was in 1995. Because the loader is a normal object, the answer can be any of these:</p>
       <ul>
         <li>“from this folder”,</li>
         <li>“from inside this jar”,</li>
@@ -158,11 +202,17 @@
       <pre class="code"><code><span class="ty">ClassLoader</span> mine   = JvmExplorer.<span class="kw">class</span>.<span class="fn">getClassLoader</span>();   <span class="cmt">// an object</span>
 <span class="ty">ClassLoader</span> theirs = String.<span class="kw">class</span>.<span class="fn">getClassLoader</span>();       <span class="cmt">// null !</span></code></pre>
 
-      <p>That <code>null</code> is not a bug. It is not a missing value, and you do not need to guard against it. It is the JVM's way of saying <strong>“the bootstrap loader”</strong>. That loader is written in C++ inside the JVM itself. So it has no Java object to hand back. Many beginners write <code>x.getClassLoader().getResource(...)</code> on a JDK class and get a <code>NullPointerException</code> that seems to make no sense. It makes perfect sense: there is no object there to call a method on.</p>
+      <p>That <code>null</code> is not a bug. It is the JVM's way of saying <strong>&ldquo;the bootstrap loader&rdquo;</strong>. (Bootstrap means &ldquo;the very first thing that starts everything else&rdquo;.)</p>
+
+      <p>Why <code>null</code>? The bootstrap loader is not written in Java. It is written in C++ (another programming language) inside the JVM itself. So there is no Java object to hand back.</p>
+
+      <p>Many beginners write <code>x.getClassLoader().getResource(...)</code> on a JDK class. They get a <code>NullPointerException</code> that seems to make no sense. It makes perfect sense: there is no object there to call a method on.</p>
 
       <h3>3.3 The three loaders every JVM has</h3>
 
-      <p>A standard JVM starts with three loaders already in place. Each one has a <strong>parent</strong>: the loader it asks first. They are not equals. They form a chain.</p>
+      <p>A standard JVM starts with three loaders already in place. Each one has a <strong>parent</strong>: the loader it asks first. They are not equals. They form a chain, like the three librarians.</p>
+
+      <p>One word first. Since Java 9, the JDK is split into named groups of packages called <strong>modules</strong>. For example, <code>java.base</code> holds the most basic classes (<code>String</code>, <code>Object</code>), and <code>java.sql</code> holds the database classes. Your own code, run from the class path, sits in a nameless group called the <strong>unnamed module</strong>. You will see that phrase in error messages.</p>
 
       <div class="table-wrap">
         <table>
@@ -176,14 +226,24 @@
       </div>
 
       <div class="callout note">
-        <p>Two naming traps that will never go away. First, the application loader is what <code>ClassLoader.getSystemClassLoader()</code> returns. It is called “system” for old reasons. It has nothing to do with the operating system, and it confuses everyone. Second, before Java 9 the top two were called the <em>bootstrap</em> and <em>extension</em> loaders. Java 9 added modules, removed the extension loader, and put the platform loader in its place. Old tutorials still say “ext”. Old code still mentions a <code>lib/ext</code> folder that no longer exists.</p>
+        <p>Two naming traps that will never go away:</p>
+        <ul>
+          <li>The application loader is what <code>ClassLoader.getSystemClassLoader()</code> returns. It is called &ldquo;system&rdquo; for old reasons. It has nothing to do with the operating system, and it confuses everyone.</li>
+          <li>Before Java 9, the top two were called the <em>bootstrap</em> and <em>extension</em> loaders. Java 9 added modules, removed the extension loader, and put the platform loader in its place. Old tutorials still say &ldquo;ext&rdquo;. Old code still mentions a <code>lib/ext</code> folder that no longer exists.</li>
+        </ul>
       </div>
 
       <p>You do not need to memorise which loader owns which JDK class. You can just ask. Our new module prints the answer for any class you name. Section 4 shows it running.</p>
 
       <h3>3.4 Parent delegation: ask upward, search downward</h3>
 
-      <p>Here is the rule behind every class request in Java. It is the opposite of what you might expect, on purpose: <strong>when a loader is asked for a class, it does not look. It asks its parent first.</strong> The parent asks its own parent, all the way to the top. A loader searches its own places only if every loader above it has failed. This is called <strong>parent delegation</strong>.</p>
+      <p>Here is the rule behind every class request in Java. It is the opposite of what you might expect, on purpose:</p>
+      <ol>
+        <li><strong>When a loader is asked for a class, it does not look. It asks its parent first.</strong></li>
+        <li>The parent asks its own parent, all the way to the top.</li>
+        <li>A loader searches its own places only if every loader above it has failed.</li>
+      </ol>
+      <p>To <em>delegate</em> means to pass a job to someone else. So this rule is called <strong>parent delegation</strong>.</p>
 
       <figure class="fig">
         <svg viewBox="0 0 720 400" role="img" aria-label="Parent delegation. Your code asks the application loader for a class. The application loader delegates up to the platform loader, which delegates up to the bootstrap loader. The bootstrap loader searches java.base first; if it fails the platform loader searches the rest of the JDK; if that fails the application loader searches the class path. The answer travels back down.">
@@ -251,14 +311,27 @@
 
       <p>Why go to this trouble? There are three reasons, most important first.</p>
 
-      <p><strong>Safety, built into the design.</strong> Suppose you put a file named <code>java/lang/String.class</code> in your own jar. It holds a fake <code>String</code> whose <code>equals</code> always returns <code>true</code>. With delegation, the application loader never gets the chance to define it. The request goes up. The bootstrap loader finds the real <code>String</code> in <code>java.base</code>. That is the one everybody gets. Your fake sits on disk forever, and nothing ever reaches it. Nothing had to spot it or block it. (Modern JVMs also flatly refuse to let any loader except bootstrap define classes in <code>java.*</code> packages. That is a second layer of safety. But delegation alone already solves the problem.)</p>
+      <h4>Reason 1: safety, built into the design</h4>
 
-      <p><strong>Only one copy of each core class.</strong> Without delegation, three loaders might each define their own <code>java.lang.Object</code>. Section 3.6 explains why those would be three types that do not fit together. Nothing in Java would work. Delegation makes sure that a class found higher in the chain is shared by every loader below it.</p>
+      <p>Suppose you put a file named <code>java/lang/String.class</code> in your own jar. It holds a fake <code>String</code> whose <code>equals</code> always returns <code>true</code>. What happens?</p>
+      <ol>
+        <li>Your code asks the application loader for <code>java.lang.String</code>.</li>
+        <li>The request goes up to the bootstrap loader.</li>
+        <li>The bootstrap loader finds the real <code>String</code> in <code>java.base</code>. That is the one everybody gets.</li>
+        <li>The application loader never gets the chance to search. So your fake sits on disk forever, and nothing ever reaches it.</li>
+      </ol>
+      <p>Nothing had to spot the fake or block it. (Modern JVMs also refuse to let any loader except bootstrap define classes in <code>java.*</code> packages. That is a second layer of safety. But delegation alone already solves the problem.)</p>
 
-      <p><strong>A clear answer.</strong> The search order is fixed, and it covers every place. So “not found” really means “nowhere”. It does not mean “not in the one place I happened to look”.</p>
+      <h4>Reason 2: only one copy of each core class</h4>
+
+      <p>Without delegation, three loaders might each define their own <code>java.lang.Object</code>. Section 3.6 explains why those would be three types that do not fit together. Nothing in Java would work. Delegation makes sure that a class found higher in the chain is shared by every loader below it.</p>
+
+      <h4>Reason 3: a clear answer</h4>
+
+      <p>The search order is fixed, and it covers every place. So &ldquo;not found&rdquo; really means &ldquo;nowhere&rdquo;. It does not mean &ldquo;not in the one place I happened to look&rdquo;.</p>
 
       <div class="callout warning">
-        <p>Delegation is a <em>habit written in code</em>, not a law the JVM forces. It lives in <code>ClassLoader.loadClass</code>, and any subclass may override that method. Application servers and plugin systems break the rule on purpose (see Section 5). That is exactly where the strangest class-loading bugs live.</p>
+        <p>Delegation is a <em>habit written in code</em>, not a law the JVM forces. It lives in the method <code>ClassLoader.loadClass</code>. Any subclass may <strong>override</strong> that method (replace it with its own version). Application servers and plugin systems break the rule on purpose (see Section 5). That is exactly where the strangest class-loading bugs live.</p>
       </div>
 
       <details class="check">
@@ -268,7 +341,7 @@
 
       <h3>3.5 Step through delegation yourself</h3>
 
-      <p>Reading the rule is one thing. Watching it make decisions is another. Pick a class below. Then switch delegation off to see what the rule protects you from. Everything the simulation shows is explained above. If JavaScript is off, you have missed nothing.</p>
+      <p>Reading the rule is one thing. Watching it make decisions is another. Pick a class below. Then switch delegation off to see what the rule protects you from. Everything the simulation shows is explained above, so if it does not work in your browser, you have missed nothing.</p>
 
       <div class="sim">
         <div class="sim-controls">
@@ -438,13 +511,24 @@
       })();
       </script>
 
-      <p>The most useful one to try is <em>forged String</em> with delegation <strong>OFF</strong>. Nothing in the JVM has to be broken for Java's safety promises to fall apart. One loader that searches itself first is enough. That is why delegation is the default. Real frameworks do sometimes break the rule, but only in small, careful ways.</p>
+      <p>The most useful one to try is <em>forged String</em> with delegation <strong>OFF</strong>. Nothing in the JVM has to be broken for Java's safety promises to fall apart. One loader that searches itself first is enough. That is why delegation is the default. Real <strong>frameworks</strong> (large ready-made code bases your code plugs into, such as Spring) do sometimes break the rule, but only in small, careful ways.</p>
 
       <h3>3.6 A class is known by its name <em>plus</em> its loader</h3>
 
       <p>This one fact explains the third pain from Section 1. It is also the fact most people are missing in their picture of how Java works.</p>
 
-      <p>Inside the JVM, a loaded class is known by <strong>a pair</strong> of things. The first is its full name, including the package. The second is the loader that <em>defined</em> it. Together, this pair is the class's <strong>runtime identity</strong>. (The package name plus the loader is called its <strong>runtime package</strong>.) The result is simple and harsh. If two different loaders each define a class called <code>com.acme.Config</code>, the JVM holds <em>two different types</em>. Not two copies of one type. Two types, as unrelated as <code>String</code> and <code>Integer</code>. You cannot put an object of one into a variable of the other. The cast fails, with a message that names the same class twice.</p>
+      <p>Inside the JVM, a loaded class is known by <strong>a pair</strong> of things:</p>
+      <ol>
+        <li>its full name, including the package, such as <code>com.acme.Config</code>;</li>
+        <li>the loader that <em>defined</em> it (the one that actually turned the bytes into a class).</li>
+      </ol>
+      <p>Together, this pair is the class's <strong>runtime identity</strong>. (&ldquo;Runtime&rdquo; means &ldquo;while the program is running&rdquo;. The package name plus the loader is likewise called its <strong>runtime package</strong>.)</p>
+
+      <p>The result is simple and harsh. If two different loaders each define a class called <code>com.acme.Config</code>, the JVM holds <em>two different types</em>. Not two copies of one type. Two types, as unrelated as <code>String</code> and <code>Integer</code>.</p>
+
+      <p>So you cannot put an object of one into a variable of the other. A <strong>cast</strong> (writing <code>(Config) obj</code> to tell Java &ldquo;treat this object as a Config&rdquo;) fails. The message names the same class twice.</p>
+
+      <p>Think of two people who are both named Alex Kim. They share a name, but they are different people. A key cut for one Alex's house does not open the other Alex's door.</p>
 
       <figure class="fig">
         <svg viewBox="0 0 720 250" role="img" aria-label="Two different class loaders each define a class named com.acme.Config. The two resulting types are not the same type, so assigning an object of one to a variable of the other fails with a ClassCastException.">
@@ -480,7 +564,9 @@
 
       <h3>3.7 The five steps, from bytes to usable class</h3>
 
-      <p>Loading is not one action. The JVM Specification defines a series of steps. Knowing their names is what makes error messages readable. People often sum up the series as <strong>loading → linking → initialization</strong>. Linking has three smaller steps of its own.</p>
+      <p>Loading is not one action. The JVM Specification (the official rule book) defines a series of steps. Knowing their names is what makes error messages readable.</p>
+
+      <p>People often sum up the series as <strong>loading → linking → initialization</strong>. Linking has three smaller steps of its own. After that, the class is used, and in rare cases it is unloaded (thrown away).</p>
 
       <figure class="fig">
         <svg viewBox="0 0 720 240" role="img" aria-label="The class lifecycle: loading, then linking which contains verification, preparation and resolution, then initialization, then use, and finally unloading. Only initialization runs the programmer's own code.">
@@ -536,25 +622,47 @@
       </figure>
 
       <h4>1 · Loading</h4>
-      <p>A loader is asked for a name. Delegation runs. Some loader finds the bytes. The JVM reads them into its own internal form. It also makes the <code>Class</code> object that you can hold in a variable. The magic number and version check from <a href="lesson-01-how-java-runs.html">Lesson 01</a> happen here. If a file does not start with <code>0xCAFEBABE</code>, or is too new, it is rejected at this step. A too-new file gives <code>UnsupportedClassVersionError</code>.</p>
+      <p>Here is what happens in this step:</p>
+      <ol>
+        <li>A loader is asked for a name. Delegation runs.</li>
+        <li>Some loader finds the bytes.</li>
+        <li>The JVM reads the bytes into its own internal form.</li>
+        <li>It makes the <code>Class</code> object that you can hold in a variable.</li>
+      </ol>
+      <p>The magic number and version check from <a href="lesson-01-how-java-runs.html">Lesson 01</a> happen here. If a file does not start with <code>0xCAFEBABE</code>, or is too new, it is rejected at this step. A too-new file gives <span class="term" tabindex="0" data-def="The JVM's refusal to run a class file newer than itself."><code>UnsupportedClassVersionError</code></span>.</p>
 
       <h4>2a · Verification</h4>
-      <p><strong>Verification</strong> is the JVM proving to itself that the bytecode cannot misbehave. It does this <em>before</em> running a single instruction. Remember, the JVM has no idea where a class file came from. Someone may have edited it by hand. It may have been damaged on the way. A compiler for a different language may have made it. So the JVM checks things like these:</p>
+      <p><strong>Verification</strong> is the JVM proving to itself that the bytecode cannot misbehave. It does this <em>before</em> running a single instruction.</p>
+      <p>Why? The JVM has no idea where a class file came from. Someone may have edited it by hand. It may have been damaged on the way. A compiler for a different language may have made it. So the JVM checks things like these:</p>
       <ul>
         <li>Does every instruction leave the <span class="term" tabindex="0" data-def="The scratch pile the JVM computes on: instructions push values onto it and operations pop their inputs and push the result.">operand stack</span> in a sensible state, no matter which path led there?</li>
         <li>Does any jump land in the middle of an instruction, or outside the method?</li>
         <li>Does any code treat an <code>int</code> as an object reference? Does any code read a local slot that was never written?</li>
         <li>Are the access rules kept? For example, no code may call a <code>private</code> method from outside its class.</li>
       </ul>
-      <p>This is why a damaged class file gives you a clear <code>VerifyError</code>, not a crashed program. It is a big part of what “Java is memory-safe” really means. The safety is checked at the door, once per class, not on every instruction. There used to be a flag to switch verification off for faster startup. It has been deprecated, and on modern JDKs it no longer does anything useful. Treat it as gone. If you see it in an old script, check your JDK's release notes.</p>
+      <p>This is why a damaged class file gives you a clear <code>VerifyError</code>, not a crashed program. It is a big part of what &ldquo;Java is memory-safe&rdquo; really means. (Memory-safe means a program cannot accidentally read or write memory it does not own.) The safety is checked at the door, once per class, not on every instruction.</p>
+      <p>There used to be a flag to switch verification off for faster startup. It has been <strong>deprecated</strong> (officially marked &ldquo;do not use; will be removed&rdquo;). On modern JDKs it no longer does anything useful. Treat it as gone. If you see it in an old script, check your JDK's release notes.</p>
 
       <h4>2b · Preparation</h4>
-      <p><strong>Preparation</strong> makes room for the class's static fields and sets them to <em>default</em> values: <code>0</code> for numbers, <code>false</code> for booleans, <code>null</code> for references. These are not your values. If you wrote <code>static int count = 5;</code>, then after preparation <code>count</code> is <strong>0</strong>. The 5 is set later, in step 3, because setting it means running code.</p>
-      <p>There is exactly one exception, and it matters for this lesson. Some fields are <code>static final</code> and set to a <em>constant expression</em> (a fixed value known at compile time). These are filled in during preparation. The value comes straight from the <code>ConstantValue</code> attribute stored in the class file. No code is needed, so the field does not wait for initialization.</p>
+      <p><strong>Preparation</strong> makes room for the class's static fields. It sets them to <em>default</em> values:</p>
+      <ul>
+        <li><code>0</code> for numbers,</li>
+        <li><code>false</code> for booleans,</li>
+        <li><code>null</code> for references.</li>
+      </ul>
+      <p>These are not your values. If you wrote <code>static int count = 5;</code>, then after preparation <code>count</code> is <strong>0</strong>. The 5 is set later, in step 3, because setting it means running code.</p>
+      <p>There is exactly one exception, and it matters for this lesson. Some fields are <code>static final</code> and set to a <em>constant expression</em> (a fixed value known at compile time, like <code>65</code>). These are filled in during preparation. The value comes straight from a part of the class file called the <code>ConstantValue</code> attribute. No code is needed, so the field does not wait for step 3.</p>
 
       <h4>2c · Resolution</h4>
-      <p>Lesson 01 showed bytecode full of <code>#</code> numbers that point into the <span class="term" tabindex="0" data-def="A numbered table inside a class file holding every name and literal the class refers to; bytecode cites entries by number.">constant pool</span>. Each one is a reference by name, like “the method named <code>println</code> with descriptor <code>(Ljava/lang/String;)V</code> in the class <code>java/io/PrintStream</code>”. <strong>Resolution</strong> turns each of those names into a direct pointer to the real thing. That may mean loading yet another class.</p>
-      <p>The rules allow resolution to happen early, during linking, or late, on first use. HotSpot chooses <strong>late</strong>. That one choice explains a whole family of production problems. A class you never call can be missing from the class path for months, and nobody notices. Then one rare piece of code finally runs, and the JVM tries to resolve it. The failure arrives at 3 a.m., not at startup.</p>
+      <p>Lesson 01 showed bytecode full of <code>#</code> numbers that point into the <span class="term" tabindex="0" data-def="A numbered table inside a class file holding every name and literal the class refers to; bytecode cites entries by number.">constant pool</span>. Each one is a reference <em>by name</em>, like &ldquo;the method named <code>println</code> with descriptor <code>(Ljava/lang/String;)V</code> in the class <code>java/io/PrintStream</code>&rdquo;.</p>
+      <p><strong>Resolution</strong> turns each of those names into a direct <strong>pointer</strong> to the real thing. (A pointer is a memory address: it says exactly where something is, so no name lookup is needed.) Resolving a name may mean loading yet another class.</p>
+      <p>The rules allow resolution to happen early, during linking, or late, on first use. HotSpot chooses <strong>late</strong>. That one choice explains a whole family of real-world problems:</p>
+      <ol>
+        <li>A class you never call can be missing from the class path for months. Nobody notices.</li>
+        <li>Then one rare piece of code finally runs.</li>
+        <li>The JVM tries to resolve the missing class, and fails.</li>
+      </ol>
+      <p>The failure arrives at 3 a.m., not at startup.</p>
 
       <h4>3 · Initialization</h4>
       <p>Finally, the JVM runs the class's own setup code: static field assignments and <code>static { }</code> blocks. This is the step with rules. The next two subsections are all about it.</p>
@@ -566,7 +674,13 @@
 
       <h3>3.8 <code>&lt;clinit&gt;</code>: the method you never wrote</h3>
 
-      <p>Where does “the class's setup code” live? <a href="lesson-01-how-java-runs.html">Lesson 01</a> showed that a constructor is stored in the class file as a normal method with the special name <code>&lt;init&gt;</code>. Initialization works the same way. <code>javac</code> collects <em>every</em> static field assignment and <em>every</em> <code>static { }</code> block. It keeps them <strong>in the order they appear in your source file</strong>. Then it joins them into one hidden method named <code>&lt;clinit&gt;</code>, short for “class initializer”. You never wrote it. You cannot call it. The JVM runs it exactly once.</p>
+      <p>Where does &ldquo;the class's setup code&rdquo; live? <a href="lesson-01-how-java-runs.html">Lesson 01</a> showed that a constructor is stored in the class file as a normal method with the special name <code>&lt;init&gt;</code>. Initialization works the same way:</p>
+      <ol>
+        <li><code>javac</code> collects <em>every</em> static field assignment and <em>every</em> <code>static { }</code> block in the class.</li>
+        <li>It keeps them <strong>in the order they appear in your source file</strong>.</li>
+        <li>It joins them into one hidden method named <code>&lt;clinit&gt;</code>, short for &ldquo;class initializer&rdquo;.</li>
+      </ol>
+      <p>You never wrote <code>&lt;clinit&gt;</code>. You cannot call it. The JVM runs it exactly once.</p>
 
       <p>Our new <code>ConstantHolder</code> is built to make this visible. It has two compile-time constants, one field whose value is worked out by a method, and one static block:</p>
 
@@ -587,17 +701,23 @@
        8: invokestatic  #21   <span class="cmt">// Method …/InitializationLog.record:(Ljava/lang/String;)V</span>
       11: return</code></pre>
 
-      <p>Look at what is <em>there</em> and what is <em>missing</em>. The two things that ran are in source order. First the <code>DESCRIPTION</code> assignment (declared first), then the static block. <code>PINNED_MAJOR_VERSION</code> and <code>COURSE_NAME</code> appear <strong>nowhere at all</strong>. No instruction sets them, because preparation already filled them in from their <code>ConstantValue</code> attributes. <code>javap -v</code> shows those attributes inside the field declarations.</p>
+      <p>Look at what is <em>there</em> and what is <em>missing</em>:</p>
+      <ul>
+        <li>The two things that ran are in source order. First the <code>DESCRIPTION</code> assignment (declared first), then the static block.</li>
+        <li><code>PINNED_MAJOR_VERSION</code> and <code>COURSE_NAME</code> appear <strong>nowhere at all</strong>. No instruction sets them, because preparation already filled them in from their <code>ConstantValue</code> attributes. <code>javap -v</code> shows those attributes inside the field declarations.</li>
+      </ul>
 
-      <p>Three facts about <code>&lt;clinit&gt;</code> are worth remembering for good:</p>
+      <h4>Three facts about <code>&lt;clinit&gt;</code> worth remembering for good</h4>
 
       <ul>
-        <li><strong>It runs exactly once, per class, per loader.</strong> There is no “re-initialize”. Once it is done, it is done, for as long as that loader lives.</li>
-        <li><strong>It is thread-safe, and the JVM does the locking for you.</strong> Say two threads touch a class that has not been set up yet, at the same moment. One runs <code>&lt;clinit&gt;</code>. The other waits until it finishes. You never write a lock for this. It is the only built-in way in Java to run setup code exactly once, safely, and only when first needed. Section 5 shows a common pattern built on it.</li>
+        <li><strong>It runs exactly once, per class, per loader.</strong> There is no &ldquo;re-initialize&rdquo;. Once it is done, it is done, for as long as that loader lives.</li>
+        <li><strong>It is thread-safe, and the JVM does the locking for you.</strong> &ldquo;Thread-safe&rdquo; means it works correctly even when several threads use it at the same time. Say two threads touch a class that has not been set up yet, at the same moment. One runs <code>&lt;clinit&gt;</code>. The other waits until it finishes. You never write a <strong>lock</strong> (code that makes threads take turns) for this. It is the only built-in way in Java to run setup code exactly once, safely, and only when first needed. Section 5 shows a common pattern built on it.</li>
         <li><strong>If it throws, the class is broken forever.</strong> The first failure shows up as <code>ExceptionInInitializerError</code>. It wraps whatever your code actually threw. Every later try to use that class gets <code>NoClassDefFoundError: Could not initialize class …</code>. That is a different error, and the real cause is nowhere in sight. This is what causes the confusing failure from Section 1.</li>
       </ul>
 
-      <p><strong>What goes wrong when you forget those three facts.</strong> Here is a very common piece of code. It is a settings class that loads its file in a static block:</p>
+      <h4>What goes wrong when you forget those three facts</h4>
+
+      <p>Here is a very common piece of code. It is a settings class that loads its file in a static block:</p>
 
       <pre class="code"><code><span class="cmt">// WRONG: runs at a moment you do not control, and its failure reaches the wrong person</span>
 <span class="kw">public final class</span> <span class="ty">Settings</span> {
@@ -628,7 +748,7 @@ Caused by: java.lang.RuntimeException: java.io.FileNotFoundException: /etc/app/s
 
       <h3>3.9 Exactly when a class initializes</h3>
 
-      <p>Now the rules. The Java Language Specification lists exactly what makes a class initialize. The list is shorter than people expect. A class initializes the first time any of these happens:</p>
+      <p>Now the rules. The Java Language Specification (the official rule book for the Java language) lists exactly what makes a class initialize. The list is shorter than people expect. A class initializes the first time any of these happens:</p>
 
       <div class="table-wrap">
         <table>
@@ -665,20 +785,33 @@ Caused by: java.lang.RuntimeException: java.io.FileNotFoundException: /etc/app/s
 
       <pre class="code"><code>System.out.<span class="fn">println</span>(Child.NAME);   <span class="cmt">// initializes Parent ONLY. Child stays cold.</span></code></pre>
 
-      <p>The source says <code>Child</code>. But the field is declared in <code>Parent</code>. Initialization follows where the field is <em>declared</em>, not the name you typed. <code>Child</code> does get loaded, because the JVM has to look at it to find out the field is inherited. But its <code>&lt;clinit&gt;</code> does not run. Our project tests exactly this. The language specification even gives an example of it, because everyone gets it wrong.</p>
+      <p>The source says <code>Child</code>. But the field is declared in <code>Parent</code>. Initialization follows where the field is <em>declared</em>, not the name you typed.</p>
+      <p><code>Child</code> does get <em>loaded</em>, because the JVM has to look at it to find out the field is inherited. But its <code>&lt;clinit&gt;</code> does not run. Our project tests exactly this. The language specification even gives an example of it, because everyone gets it wrong.</p>
 
-      <p>Two smaller rules, to be complete. First, interfaces initialize under the same conditions, with one twist. Initializing a class also initializes its superclasses. It also initializes any interfaces above it that declare <code>default</code> methods. It does not initialize plain interfaces that only hold constants. Second, an <code>assert</code> statement inside a class also makes that class initialize. That is a rare corner you will probably never meet.</p>
+      <h4>Two smaller rules, to be complete</h4>
+      <ul>
+        <li><strong>Interfaces</strong> initialize under the same conditions, with one twist. Initializing a class also initializes its superclasses. It also initializes any interfaces above it that declare <code>default</code> methods. It does not initialize plain interfaces that only hold constants.</li>
+        <li>An <code>assert</code> statement inside a class also makes that class initialize. That is a rare corner you will probably never meet.</li>
+      </ul>
 
-      <p><strong>What goes wrong when you confuse mentioning a class with using it.</strong> For years, programs that connected to a database did this. It failed with &ldquo;no suitable driver found&rdquo;:</p>
+      <h4>What goes wrong when you confuse mentioning a class with using it</h4>
+
+      <p>To talk to a database, a Java program uses a <strong>driver</strong>: a library class that knows how to speak to one kind of database. For years, programs that connected to a database did this. It failed with &ldquo;no suitable driver found&rdquo;:</p>
 
       <pre class="code"><code><span class="kw">import</span> com.mysql.cj.jdbc.Driver;                       <span class="cmt">// compile-time only - does nothing at run time</span>
 <span class="ty">Connection</span> c = DriverManager.<span class="fn">getConnection</span>(url);    <span class="cmt">// the driver never registered itself</span></code></pre>
 
-      <p>The driver registers itself with <code>DriverManager</code> from inside its own static block. So it only works once the driver class has <em>initialized</em>. An import never initializes anything. Every old tutorial has a line that looks like a superstition: <code>Class.forName("com.mysql.cj.jdbc.Driver");</code>. That line was the fix. It forces the class to initialize, by name. (Modern drivers are found automatically, as Section 5 shows. But now you know why that line ever existed.)</p>
+      <p>Here is why it failed:</p>
+      <ol>
+        <li>The driver registers itself with <code>DriverManager</code> from inside its own static block.</li>
+        <li>So registration only happens once the driver class has <em>initialized</em>.</li>
+        <li>An import never initializes anything. So the driver never registered.</li>
+      </ol>
+      <p>Every old tutorial has a line that looks like a superstition: <code>Class.forName("com.mysql.cj.jdbc.Driver");</code>. That line was the fix. It forces the class to initialize, by name. (Modern drivers are found automatically, as Section 5 shows. But now you know why that line ever existed.)</p>
 
       <details class="check">
         <summary>Does <code>List&lt;Config&gt; list = new ArrayList&lt;&gt;();</code> initialize <code>Config</code>?</summary>
-        <div class="answer-body">No. <code>Config</code> appears only as a type argument. The compiler removes type arguments (this is called erasure). They leave nothing in the bytecode that mentions the class at run time. Even without erasure, mentioning a type is not using it. <code>Config</code> initializes the first time you actually create one, call one of its static methods, or read one of its static fields that is not a constant.</div>
+        <div class="answer-body">No. <code>Config</code> appears only inside the angle brackets, as a <em>type argument</em>. The compiler removes type arguments after checking them (this is called <strong>erasure</strong>). They leave nothing in the bytecode that mentions the class at run time. Even without erasure, mentioning a type is not using it. <code>Config</code> initializes the first time you actually create one, call one of its static methods, or read one of its static fields that is not a constant.</div>
       </details>
 
       <h3>3.10 Why a compile-time constant is different from everything else</h3>
@@ -691,7 +824,8 @@ Caused by: java.lang.RuntimeException: java.io.FileNotFoundException: /etc/app/s
         <li>its type is a primitive (like <code>int</code>) or <code>String</code>, and</li>
         <li>it is set to a <em>constant expression</em>: a fixed value like <code>65</code> or <code>"hi"</code>, or arithmetic on fixed values and other constants.</li>
       </ul>
-      <p>(The specification calls it a <em>constant variable</em>.) When <code>javac</code> compiles code that <em>reads</em> such a field, it does not write a field read at all. It copies the value straight into the reading class's own bytecode.</p>
+      <p>(The specification calls it a <em>constant variable</em>.)</p>
+      <p>Here is the surprise. When <code>javac</code> compiles code that <em>reads</em> such a field, it does not write a field read at all. It copies the value straight into the reading class's own bytecode. This copying is called <strong>inlining</strong> the constant.</p>
 
       <p>So our <code>JvmExplorer</code> contains this line:</p>
 
@@ -705,15 +839,23 @@ javap -v target/classes/com/corejava/jvm/JvmExplorer.class | findstr ConstantHol
 <span class="cmt"># on macOS / Linux:</span>
 javap -v target/classes/com/corejava/jvm/JvmExplorer.class | grep ConstantHolder</code></pre>
 
-      <p>Now the real-world result. Ship a library with <code>public static final String API_VERSION = "1.0";</code>. Every application that compiles against it copies <code>"1.0"</code> into its own class files. Now release version 2 of the library with <code>"2.0"</code>. Drop in the new jar and restart. Every application that was not <strong>recompiled</strong> still prints <code>1.0</code>. The string is in <em>their</em> bytecode, not in the library's. The library is never asked. There is no cache to clear.</p>
+      <p>Now the real-world result, which is Pain 2 from Section 1:</p>
+      <ol>
+        <li>Ship a library with <code>public static final String API_VERSION = "1.0";</code>.</li>
+        <li>Every application that compiles against it copies <code>"1.0"</code> into its own class files.</li>
+        <li>Now release version 2 of the library with <code>"2.0"</code>. Drop in the new jar and restart.</li>
+        <li>Every application that was not <strong>recompiled</strong> still prints <code>1.0</code>.</li>
+      </ol>
+      <p>The string is in <em>their</em> bytecode, not in the library's. The library is never asked. There is no cache to clear.</p>
 
       <div class="callout warning">
-        <p>This leads to a rule worth writing on the wall: <strong>in a library's public API, use a compile-time constant only for a value that will truly never change.</strong> If a value might change between releases, offer it through a method (<code>public static String apiVersion()</code>). Or use a field that is not a constant (<code>public static final String API_VERSION = computeVersion();</code>). Then callers really read it while the program runs. And when constants do change, rebuild everything that reads them. Do a full clean build, not a partial one.</p>
+        <p>This leads to a rule worth remembering. A library's <strong>public API</strong> is the set of classes, methods and fields it offers for other code to use. <strong>In a public API, use a compile-time constant only for a value that will truly never change.</strong></p>
+        <p>If a value might change between releases, offer it through a method (<code>public static String apiVersion()</code>). Or use a field that is not a constant (<code>public static final String API_VERSION = computeVersion();</code>). Then callers really read it while the program runs. And when constants do change, rebuild everything that reads them. Do a full clean build, not a partial one.</p>
       </div>
 
       <h3>3.11 Watching it happen on your own machine</h3>
 
-      <p>You can see all of the above for yourself. It is not just theory. The JVM will describe its own class loading if you ask:</p>
+      <p>You can see all of the above for yourself. It is not just theory. The JVM will describe its own class loading if you ask. You ask by adding a <strong>flag</strong> (an option starting with <code>-</code>) to the <code>java</code> command:</p>
 
       <pre class="terminal"><code><span class="cmt"># one line per class, as it loads — the classic flag</span>
 java -verbose:class -cp target/classes com.corejava.jvm.JvmExplorer
@@ -735,14 +877,22 @@ java -Xlog:class+load=info:file=classes.txt -cp target/classes com.corejava.jvm.
       <p>Two details in that output are worth naming.</p>
       <ul>
         <li><code>jrt:/java.sql</code> is where the JDK stores its own modules. It replaced the old <code>rt.jar</code> file. Its addresses start with <code>jrt:</code>.</li>
-        <li><code>shared objects file</code> means the class came from a ready-made archive that ships with the JDK. This is called class-data sharing, and it makes startup faster. The JVM does not read <code>java.lang.Object</code> from scratch every time it starts. It keeps a ready-made memory image and just loads that. You will see this on most core JDK classes.</li>
+        <li><code>shared objects file</code> means the class came from a ready-made archive that ships with the JDK. This is called <strong>class-data sharing</strong>, and it makes startup faster. The JVM does not read <code>java.lang.Object</code> from scratch every time it starts. It keeps a ready-made memory image and just loads that. You will see this on most core JDK classes.</li>
       </ul>
 
       <div class="callout note">
-        <p><strong>Why not <code>mvn exec:java</code> for this?</strong> Because <code>exec:java</code> runs your <code>main</code> <em>inside Maven's own JVM</em>. So <code>-verbose:class</code> would list Maven's thousands of classes next to yours. You would also have to give the JVM flags to Maven, not to your program. Running <code>java</code> directly on <code>target/classes</code> gives a clean JVM. It holds nothing but the JDK and your code. That is exactly what you want to watch.</p>
+        <p><strong>Why not <code>mvn exec:java</code> for this?</strong> Because <code>exec:java</code> runs your <code>main</code> <em>inside Maven's own JVM</em>. So <code>-verbose:class</code> would list Maven's thousands of classes next to yours. You would also have to give the JVM flags to Maven, not to your program.</p>
+        <p>Running <code>java</code> directly on <code>target/classes</code> gives a clean JVM. It holds nothing but the JDK and your code. That is exactly what you want to watch.</p>
       </div>
 
       <h3>3.12 The three errors, finally readable</h3>
+
+      <p>Two words first. In Java, both <code>Exception</code> and <code>Error</code> are things a program can <em>throw</em> to signal a problem:</p>
+      <ul>
+        <li>An <strong>Exception</strong> is a problem a program might reasonably handle. A <strong>checked</strong> exception is one the compiler forces you to catch or declare.</li>
+        <li>An <strong>Error</strong> is a serious problem a program is not expected to recover from.</li>
+      </ul>
+      <p>Also, a <strong>stack trace</strong> is the list of method calls Java prints with an error. It shows where the error happened and which calls led there. A <strong>log</strong> is the running record of messages a program prints while it works.</p>
 
       <div class="table-wrap">
         <table>
@@ -750,13 +900,13 @@ java -Xlog:class+load=info:file=classes.txt -cp target/classes com.corejava.jvm.
           <tbody>
             <tr>
               <td><code>ClassNotFoundException</code><br><em>(a checked Exception)</em></td>
-              <td>Some code asked for a class <strong>by name, as text</strong>. For example <code>Class.forName</code>, <code>loadClass</code>, or a framework reading a config file. The whole delegation chain found nothing.</td>
+              <td>Some code asked for a class <strong>by name, as text</strong>. For example <code>Class.forName</code>, <code>loadClass</code>, or a framework reading a settings file. The whole delegation chain found nothing.</td>
               <td>The name in the message. Look for a typo, a wrong package, or a jar that really is missing from the class path.</td>
             </tr>
             <tr>
               <td><code>NoClassDefFoundError</code><br><em>(an Error)</em></td>
               <td>The JVM was <strong>resolving</strong> a reference inside your compiled code. So the class existed when you compiled, but it is not there now.</td>
-              <td>A dependency that was there at build time but is missing at run time. For example: a jar that was not packaged, a “provided” scope, or a container image built from the wrong layer.</td>
+              <td>A dependency that was there at build time but is missing at run time. For example: a jar that was not packaged with the program, or a Maven dependency marked &ldquo;provided&rdquo; (meaning &ldquo;someone else will supply this at run time&rdquo;) that nobody supplied.</td>
             </tr>
             <tr>
               <td><code>NoClassDefFoundError: Could not initialize class X</code></td>
@@ -766,7 +916,7 @@ java -Xlog:class+load=info:file=classes.txt -cp target/classes com.corejava.jvm.
             <tr>
               <td><code>ExceptionInInitializerError</code></td>
               <td>The first time a static initializer threw. Its <code>getCause()</code> is your real exception.</td>
-              <td>Whatever your <code>static</code> block does. For example: reading a missing file, a null setting, or a regex that fails.</td>
+              <td>Whatever your <code>static</code> block does. For example: reading a missing file, a setting that is <code>null</code>, or a text pattern that fails to build.</td>
             </tr>
             <tr>
               <td><code>ClassCastException: X cannot be cast to X</code></td>
@@ -792,7 +942,8 @@ java -Xlog:class+load=info:file=classes.txt -cp target/classes com.corejava.jvm.
     <section id="s4">
       <h2><span class="sec-num">4</span> Applied to jvm-explorer</h2>
 
-      <p>There are eight new source files, one changed file, and three new test classes. The project gets its second real skill: it can now report <em>who loaded</em> any class. It also gets some sample classes. Their only job is to prove, with test checks, exactly when a class initializes.</p>
+      <p>There are eight new source files, one changed file, and three new test classes. The project gets its second real skill: it can now report <em>who loaded</em> any class.</p>
+      <p>It also gets some sample classes. Their only job is to prove, with test checks, exactly when a class initializes.</p>
 
       <h3>4.1 What happens, step by step, when the new code in <code>JvmExplorer</code> runs</h3>
 
@@ -856,7 +1007,13 @@ java -Xlog:class+load=info:file=classes.txt -cp target/classes com.corejava.jvm.
 
       <h3>4.4 The witness</h3>
 
-      <p>Saved at <code>.../loading/InitializationLog.java</code>. Class initialization leaves no trace of its own, so we make one. Every sample class calls <code>record</code> from its static initializer. The tests read the log afterwards.</p>
+      <p>Saved at <code>.../loading/InitializationLog.java</code>. Class initialization leaves no trace of its own, so we make one:</p>
+      <ol>
+        <li>Every sample class calls <code>record</code> from its static initializer.</li>
+        <li><code>record</code> adds the class's name to a list.</li>
+        <li>The tests read the list afterwards to see which classes have initialized, and in what order.</li>
+      </ol>
+      <p>The list is wrapped by <code>Collections.synchronizedList</code>, which makes it safe for several threads to add to it at once.</p>
 
       <pre class="code"><code><span class="cmt">// One log for the whole JVM - the right shape, since a class also initializes</span>
 <span class="cmt">// once per JVM (strictly: once per class loader).</span>
@@ -878,7 +1035,8 @@ java -Xlog:class+load=info:file=classes.txt -cp target/classes com.corejava.jvm.
 
       <h3>4.5 The four sample classes</h3>
 
-      <p>Each sample class exists to make one rule visible. Each one is touched by exactly one test. That is because a class initializes only once per JVM, and there is no way to undo it. This limit is written as a comment in the test file. A future lesson that reused one of these classes without thinking would quietly break the proof.</p>
+      <p>Each sample class exists to make one rule visible. Each one is touched by exactly one test. Why only one? A class initializes only once per JVM, and there is no way to undo it. If two tests used the same class, the second test would find it already initialized.</p>
+      <p>This limit is written as a comment in the test file. A future lesson that reused one of these classes without thinking would quietly break the proof.</p>
 
       <pre class="code"><code><span class="cmt">// ConstantHolder — constants are inlined; DESCRIPTION is not.</span>
 <span class="kw">public static final</span> <span class="ty">int</span> PINNED_MAJOR_VERSION = <span class="num">65</span>;                 <span class="cmt">// no code, no wake-up</span>
@@ -940,7 +1098,7 @@ java -Xlog:class+load=info:file=classes.txt -cp target/classes com.corejava.jvm.
                     &lt; InitializationLog.<span class="fn">positionOf</span>(<span class="str">"InitOrderChild"</span>), <span class="cmt">/* … */</span>);
 }</code></pre>
 
-      <p>Also notice what the class-loader tests do <em>not</em> check, on purpose: which loader loaded the test classes themselves. A test framework is allowed to use its own loader. So a test that checked that would be testing the test runner, not the JVM. Instead, the tests check only what the specification really promises:</p>
+      <p>Also notice what the class-loader tests do <em>not</em> check, on purpose: which loader loaded the test classes themselves. A test framework is allowed to use its own loader. So a test that checked that would be testing the test tool, not the JVM. Instead, the tests check only what the specification really promises:</p>
       <ul>
         <li><code>String</code> comes from bootstrap.</li>
         <li>Every chain ends at bootstrap.</li>
@@ -973,7 +1131,7 @@ mvn test</code></pre>
 [INFO]
 <span class="out">[INFO] BUILD SUCCESS</span></code></pre>
 
-      <p>Look at the odd line <code>&gt;&gt;&gt; LateComer's static initializer is running NOW</code> in the middle of the test output. It is not noise. It is printed from inside a <code>&lt;clinit&gt;</code>. The experiment's nested class initializes during the test that calls its static method. Seeing the line appear <em>there</em>, and nowhere else, is itself the lesson.</p>
+      <p>Look at the odd line <code>&gt;&gt;&gt; LateComer's static initializer is running NOW</code> in the middle of the test output. It is not noise. It is printed from inside a <code>&lt;clinit&gt;</code>. The experiment's nested class initializes during the one test that calls its static method. Seeing the line appear <em>there</em>, and nowhere else, is itself the lesson.</p>
 
       <p>Then the main program:</p>
 
@@ -1042,7 +1200,7 @@ java -verbose:class -cp target/classes com.corejava.jvm.experiments.ClassLoading
 <span class="cmt"># macOS / Linux:</span>
 java -verbose:class -cp target/classes com.corejava.jvm.experiments.ClassLoadingExperiment | grep LateComer</code></pre>
 
-      <p><strong>Predicted:</strong> exactly one <code>[class,load]</code> line for <code>com.corejava.jvm.experiments.ClassLoadingExperiment$LateComer</code>. When you run the unfiltered version, it appears <em>after</em> MARKER 3 and before MARKER 4. Not at startup. Not at MARKER 2, even though a value was read from that class there. Two honest warnings about that prediction:</p>
+      <p><strong>Predicted:</strong> exactly one <code>[class,load]</code> line for <code>com.corejava.jvm.experiments.ClassLoadingExperiment$LateComer</code>. When you run the unfiltered version, it appears <em>after</em> MARKER 3 and before MARKER 4. It does not appear at startup. It does not appear at MARKER 2 either, even though a value was read from that class there. Two honest warnings about that prediction:</p>
       <ul>
         <li>The exact moment of <em>loading</em> is up to the JVM. The specification only promises that a class is not <em>initialized</em> too early.</li>
         <li>The JVM's log and your program's output are two separate streams mixed together. So a line may sometimes land one place earlier or later than you expect.</li>
@@ -1064,7 +1222,11 @@ java -verbose:class -cp target/classes com.corejava.jvm.experiments.ClassLoading
     <section id="s5">
       <h2><span class="sec-num">5</span> In the wild</h2>
 
-      <p><strong>The initialization-on-demand holder idiom.</strong> (An <em>idiom</em> is a common, well-known code pattern.) This is the neatest use of everything in Section 3.9. You will find it all over the JDK and in well-written libraries:</p>
+      <h3>The initialization-on-demand holder idiom</h3>
+
+      <p>An <em>idiom</em> is a common, well-known code pattern. This one solves a classic problem. You want exactly one object of a class (this is called a <strong>singleton</strong>). The object is expensive to make, so you want it made only when first needed. And several threads may ask for it at the same moment.</p>
+
+      <p>This idiom is the neatest use of everything in Section 3.9. You will find it all over the JDK and in well-written libraries:</p>
 
       <pre class="code"><code><span class="kw">public final class</span> <span class="ty">ExpensiveThing</span> {
 
@@ -1078,7 +1240,7 @@ java -verbose:class -cp target/classes com.corejava.jvm.experiments.ClassLoading
     }
 }</code></pre>
 
-      <p>There is no <code>synchronized</code>, no double-checked locking, no <code>volatile</code>, and no atomics. Yet it is completely thread-safe, and the object is only made when first needed. Here is why:</p>
+      <p>There is no <code>synchronized</code> and none of Java's other thread-safety tools. Yet it is completely thread-safe, and the object is only made when first needed. Here is why:</p>
       <ul>
         <li>A nested class is a separate class. So <code>Holder</code> is not initialized when <code>ExpensiveThing</code> is.</li>
         <li><code>Holder</code> initializes the first time someone reads <code>Holder.INSTANCE</code>.</li>
@@ -1086,14 +1248,44 @@ java -verbose:class -cp target/classes com.corejava.jvm.experiments.ClassLoading
       </ul>
       <p>The idiom is nothing more than the class-initialization rules, used on purpose.</p>
 
-      <p><strong>Application servers and Spring Boot turn delegation around on purpose.</strong> A servlet container like Tomcat runs several web applications in one JVM. Each one has its own libraries. Application A wants version 1 of a library. Application B wants version 3. With strict parent delegation, both would get whichever copy the shared parent held. So a web application's loader checks <em>itself first</em> for application classes. It only asks upward for JDK classes. This is a careful, documented reversal of the rule in Section 3.4. It is why “it works in my IDE but not in the container” is a whole family of bugs, not just one. Spring Boot's runnable jar also uses its own loader, to read jars stored inside the jar. A plain JVM cannot do that, because the class path does not support jars inside jars. <em>(The exact class name of Boot's loader has changed between major versions. Check your version's source instead of trusting a blog post.)</em></p>
+      <h3>Application servers and Spring Boot turn delegation around on purpose</h3>
 
-      <p><strong><code>ServiceLoader</code> and the context class loader.</strong> Delegation causes one built-in problem: a parent can never see its children's classes. The JDK's <code>java.sql.DriverManager</code> is loaded by the platform loader. But it must somehow create your MySQL driver, which lives on the application class path, <em>below</em> it. It cannot reach down. Java's answer is the <strong>thread context class loader</strong>. Each thread carries a reference to a loader, and framework code can ask for it. This gets around the chain on purpose. <code>ServiceLoader</code> uses it to find implementations. It is why modern JDBC no longer needs <code>Class.forName</code>. It also causes many hard-to-find bugs. A thread's context loader is whatever the last framework to touch the thread set it to.</p>
+      <p>An <strong>application server</strong> is a program that runs other programs inside it. Tomcat is a well-known one. It can run several web applications in one JVM. Each one has its own libraries. That creates a problem:</p>
+      <ol>
+        <li>Application A wants version 1 of a library. Application B wants version 3.</li>
+        <li>With strict parent delegation, both would get whichever copy the shared parent loader held.</li>
+        <li>So Tomcat gives each web application its own loader, which checks <em>itself first</em> for application classes. It only asks upward for JDK classes.</li>
+      </ol>
+      <p>This is a careful, documented reversal of the rule in Section 3.4. It is why &ldquo;it works in my IDE but not on the server&rdquo; is a whole family of bugs, not just one.</p>
 
-      <p><strong>Every hot-reload you have used is a new class loader.</strong> A loader can never load or initialize the same class a second time. That rule has no exceptions. So every tool that seems to reload code works by throwing away a whole class loader and building a fresh one. Examples are JRebel, Spring Boot devtools, an application server redeploy, and an IDE's hot swap for bigger changes. That one fact explains why reloading works. It also explains why reloading leaks memory when something still holds a reference to the old loader.</p>
+      <p><strong>Spring Boot</strong> (a popular framework for building Java services) packs a whole program into one runnable jar, with the libraries stored as jars <em>inside</em> it. A plain JVM cannot read a jar stored inside a jar. So Spring Boot uses its own loader to do it. <em>(The exact class name of Boot's loader has changed between major versions. Check your version's source instead of trusting a blog post.)</em></p>
+
+      <h3><code>ServiceLoader</code> and the context class loader</h3>
+
+      <p>Delegation causes one built-in problem: <strong>a parent can never see its children's classes</strong>. Here is a real case:</p>
+      <ul>
+        <li>The JDK's <code>java.sql.DriverManager</code> is loaded by the platform loader.</li>
+        <li>It must somehow create your MySQL database driver. That driver lives on the application class path, <em>below</em> the platform loader.</li>
+        <li>Delegation only asks upward. So <code>DriverManager</code> cannot reach down.</li>
+      </ul>
+
+      <p>Java's answer is the <strong>thread context class loader</strong>. Each thread carries a reference to a loader, and framework code can ask for it. This gets around the chain on purpose. <code>ServiceLoader</code> (a JDK class that finds implementations of an interface on the class path) uses it. That is why modern database code (JDBC) no longer needs <code>Class.forName</code>.</p>
+
+      <p>It also causes many hard-to-find bugs. A thread's context loader is whatever the last framework to touch that thread set it to.</p>
+
+      <h3>Every hot-reload you have used is a new class loader</h3>
+
+      <p><strong>Hot-reloading</strong> means changing code while the program keeps running. But a loader can never load or initialize the same class a second time. That rule has no exceptions. So how does reloading work?</p>
+      <ol>
+        <li>The tool throws away the whole class loader that held the old classes.</li>
+        <li>It builds a fresh loader.</li>
+        <li>The fresh loader loads the new versions of the classes.</li>
+      </ol>
+      <p>Tools such as JRebel, Spring Boot devtools, an application server redeploy, and an IDE's hot swap for bigger changes all work this way.</p>
+      <p>That one fact explains why reloading works. It also explains why reloading <strong>leaks memory</strong> (uses up memory that never comes back) when something still holds a reference to the old loader. Lesson 04 explains why a held reference keeps memory alive.</p>
 
       <div class="callout realworld">
-        <p>Interview questions about class loading almost always come down to one question: <em>do you understand that the JVM only does things when it must, and that this has consequences?</em> Strong answers link the mechanism to something real:</p>
+        <p>Job-interview questions about class loading almost always come down to one question: <em>do you understand that the JVM only does things when it must, and that this has consequences?</em> Strong answers link the mechanism to something real:</p>
         <ul>
           <li>why a missing jar can crash a service at 3 a.m. instead of at startup (late resolution),</li>
           <li>why the holder idiom needs no locks (the <code>&lt;clinit&gt;</code> promise),</li>
@@ -1109,29 +1301,17 @@ java -verbose:class -cp target/classes com.corejava.jvm.experiments.ClassLoading
       <h2><span class="sec-num">6</span> Gotchas and common mistakes</h2>
       <ul>
         <li><strong>Calling a method on the result of <code>getClassLoader()</code>.</strong> For any core JDK class it returns <code>null</code>. So <code>String.class.getClassLoader().getResource(…)</code> always throws a <code>NullPointerException</code>. People make this mistake because every other “get” method in Java returns an object. <em>Avoid it:</em> remember that <code>null</code> means bootstrap. Prefer <code>SomeClassOfYours.class.getResourceAsStream(…)</code>. That is the <code>Class</code> method, not the <code>ClassLoader</code> one, and it handles this for you. Its path is relative to the class's package, unless you start it with <code>/</code>.</li>
-        <li><strong>Mixing up <code>ClassNotFoundException</code> and <code>NoClassDefFoundError</code>.</strong> They come from different places and mean different things. The first is a failed lookup <em>by name</em> (reflection, a config file, a framework). The second is a failed <em>resolution</em> of something your compiled code already points to. <em>Avoid it:</em> ask “did anyone type this class's name as a string?” If yes, it is a name problem. If no, it is a packaging problem: something on the compile class path is missing from the runtime class path.</li>
+        <li><strong>Mixing up <code>ClassNotFoundException</code> and <code>NoClassDefFoundError</code>.</strong> They come from different places and mean different things. The first is a failed lookup <em>by name</em>. That happens with <strong>reflection</strong> (code that finds and uses classes by their names while running), a settings file, or a framework. The second is a failed <em>resolution</em> of something your compiled code already points to. <em>Avoid it:</em> ask &ldquo;did anyone type this class's name as a string?&rdquo; If yes, it is a name problem. If no, it is a packaging problem: something on the compile-time class path is missing from the run-time class path.</li>
         <li><strong>Expecting a changed <code>public static final</code> constant to reach callers.</strong> It was copied into their class files when they were compiled. <em>Avoid it:</em> in a library API, offer values that may change through a method or a field that is not a constant. When a constant must change, rebuild everything that uses it from clean, not partially.</li>
         <li><strong>Thinking <code>Class.forName</code> and <code>loader.loadClass</code> do the same thing.</strong> The first initializes. The second does not. If you swap one for the other, things can quietly stop happening: a driver does not register, a plugin does not install itself, a static cache does not fill. There is no error at all. <em>Avoid it:</em> choose on purpose. To look at a class without initializing it, use the three-argument <code>Class.forName(name, false, loader)</code>.</li>
         <li><strong>Putting the same class on the class path twice and expecting a predictable winner.</strong> The class path is searched in order, so the first copy does win. But which copy comes first depends on the order your build tool happened to produce. That order can change when you add an unrelated dependency. <em>Avoid it:</em> treat a duplicate class as a bug to remove, not an order to tweak. Maven's dependency tree shows where each copy comes from.</li>
-        <li><strong>Writing a custom class loader for a problem that is not a class-loading problem.</strong> Custom loaders are right for exactly two jobs: keeping things apart (plugins that must not see each other) and reloading. “Two libraries want different versions of a third” is a dependency problem, and you fix it in the build file. Also, every custom loader risks a <strong>class loader leak</strong>. One leftover reference, like a <code>ThreadLocal</code> or a static registry entry, keeps the loader alive. It also keeps alive every class that loader defined. So each redeploy leaks a whole copy of the application. <em>Avoid it:</em> do not write one unless the problem really is keeping things apart or reloading. Lesson 07 shows what a leak looks like in a heap dump.</li>
+        <li><strong>Writing a custom class loader for a problem that is not a class-loading problem.</strong> Custom loaders are right for exactly two jobs: keeping things apart (plugins that must not see each other) and reloading. &ldquo;Two libraries want different versions of a third&rdquo; is a dependency problem, and you fix it in the build file. Also, every custom loader risks a <strong>class loader leak</strong>. One leftover reference keeps the loader alive. (Examples: a value stored in a <code>ThreadLocal</code>, which is a per-thread storage box, or an entry left in a static list.) It also keeps alive every class that loader defined. So each redeploy leaks a whole copy of the application. <em>Avoid it:</em> do not write one unless the problem really is keeping things apart or reloading. Lesson 07 shows what a leak looks like in a heap dump (a snapshot file of everything in memory).</li>
       </ul>
     </section>
 
-    <!-- ===================== SECTION 7 — TAKEAWAYS ===================== -->
+    <!-- ===================== SECTION 7 — CHALLENGE ===================== -->
     <section id="s7">
-      <h2><span class="sec-num">7</span> Key takeaways</h2>
-      <ul>
-        <li>A class loader is a normal Java object that turns a class's name into a loaded class. Every JVM starts with three loaders in a parent chain: bootstrap (which has no Java object and shows up as <code>null</code>), platform, and application.</li>
-        <li>Parent delegation means a loader asks its parent before searching itself. That is why a fake <code>java.lang.String</code> on your class path can never be reached, and why every JDK class exists exactly once.</li>
-        <li>A class is known by its name <em>plus</em> the loader that defined it. So two loaders that define the same name make two truly different types, which causes <code>ClassCastException: Config cannot be cast to Config</code>.</li>
-        <li>Every class goes through loading, then linking (verification, preparation, resolution), then initialization. Only initialization runs your own code, in a hidden <code>&lt;clinit&gt;</code> method that runs exactly once per loader, is locked by the JVM, and breaks the class forever if it throws.</li>
-        <li>A class initializes on <code>new</code>, a static method call, reading or writing a static field that is not a constant, or <code>Class.forName(name)</code>. It does <strong>not</strong> initialize on an import, a class literal, an array of the type, or reading a compile-time constant. Constants are copied into the reader's own bytecode, which is why changed constants do not reach callers that were not recompiled.</li>
-      </ul>
-    </section>
-
-    <!-- ===================== SECTION 8 — CHALLENGE ===================== -->
-    <section id="s8">
-      <h2><span class="sec-num">8</span> Challenge</h2>
+      <h2><span class="sec-num">7</span> Challenge</h2>
 
       <p><strong>Part A — predict the output.</strong> Without compiling anything, write down exactly what this program prints, and in what order:</p>
 
@@ -1190,7 +1370,8 @@ com.acme.Config is in unnamed module of loader org.acme.PluginLoader @61bbe9ba)<
           <li><strong><code>1: 10</code> — nothing initializes.</strong> <code>PINNED</code> is a compile-time constant. So its value was copied into <code>Puzzle</code>'s bytecode. It does not matter at all that the source names <code>Beta</code>. <code>Alpha</code> is never touched either.</li>
           <li><strong><code>2: 3</code> — nothing initializes.</strong> Making an array of a type does not make any object of that type. All three slots are <code>null</code>.</li>
           <li><strong><code>3: Beta</code> — nothing initializes.</strong> A class literal needs <code>Beta</code> to be <em>loaded</em>, so that the <code>Class</code> object exists. Asking for its name only reads information about the class. It runs none of the class's code.</li>
-          <li><strong><code>Alpha init</code>, then <code>4: 20</code>.</strong> <code>COMPUTED</code> is <em>not</em> a constant expression. So reading it forces initialization. But it initializes the class that <strong>declares</strong> the field. That is <code>Alpha</code>, not <code>Beta</code>. This is the rule people get wrong. <code>Beta</code> is still not initialized here, which is why <code>Beta init</code> has not printed. Notice the order too. <code>Alpha init</code> appears <em>before</em> <code>4: 20</code>. The initializer must run before the field can be read. And the whole <code>"4: " + Beta.COMPUTED</code> is worked out before <code>println</code> is called.</li>
+          <li><strong><code>Alpha init</code>, then <code>4: 20</code>.</strong> <code>COMPUTED</code> is <em>not</em> a constant expression. So reading it forces initialization. But it initializes the class that <strong>declares</strong> the field. That is <code>Alpha</code>, not <code>Beta</code>. This is the rule people get wrong. <code>Beta</code> is still not initialized here, which is why <code>Beta init</code> has not printed.
+            <br>Notice the order too. <code>Alpha init</code> appears <em>before</em> <code>4: 20</code>. The initializer must run before the field can be read. And the whole <code>"4: " + Beta.COMPUTED</code> is worked out before <code>println</code> is called.</li>
           <li><strong><code>Beta init</code>, then <code>5: …</code>.</strong> <code>new Beta()</code> finally initializes <code>Beta</code>. Its superclass <code>Alpha</code> would go first, but <code>Alpha</code> is already done. So only <code>Beta init</code> prints. Then the object's default <code>toString</code> prints the class name, an <code>@</code>, and a hex number (its identity hash). That number changes on every run.</li>
         </ul>
 
@@ -1212,10 +1393,10 @@ com.acme.Config is in unnamed module of loader org.acme.PluginLoader @61bbe9ba)<
       </details>
     </section>
 
-    <!-- ===================== SECTION 9 — ALMANAC ===================== -->
-    <section id="s9">
-      <h2><span class="sec-num">9</span> Almanac update</h2>
-      <p>Added to <code>almanac.md</code> this lesson:</p>
+    <!-- ===================== SECTION 8 — ALMANAC ===================== -->
+    <section id="s8">
+      <h2><span class="sec-num">8</span> Almanac update</h2>
+      <p>Added to <code>almanac.md</code>, the course cheat-sheet, this lesson:</p>
       <ul>
         <li>The three built-in loaders and their names.</li>
         <li>The parent-delegation rule, and the three reasons for it.</li>
@@ -1229,8 +1410,86 @@ com.acme.Config is in unnamed module of loader org.acme.PluginLoader @61bbe9ba)<
       </ul>
     </section>
 
-    <!-- ===================== SECTION 10 — WHAT IS NEXT ===================== -->
+    <!-- ===================== SECTION 9 — KEY WORDS ===================== -->
+    <section id="s9">
+      <h2><span class="sec-num">9</span> Key words</h2>
+      <p>Every new term from this lesson, with a one-line meaning.</p>
+      <dl class="keywords">
+        <dt>Plugin</dt><dd>An add-on that a program loads while running, like a browser extension.</dd>
+        <dt>Cache</dt><dd>A saved copy of something, kept so it does not have to be fetched again.</dd>
+        <dt>Loading a class</dt><dd>Turning a class file's bytes into a live, checked class the JVM can use.</dd>
+        <dt>Class loader</dt><dd>An ordinary Java object that takes a class name and gives back a loaded class.</dd>
+        <dt>Bootstrap loader</dt><dd>The loader built into the JVM (in C++) for core classes like <code>String</code>. It shows up as <code>null</code>.</dd>
+        <dt>Module</dt><dd>A named group of packages. The JDK is split into modules such as <code>java.base</code> and <code>java.sql</code>.</dd>
+        <dt>Unnamed module</dt><dd>Where code run from the class path lives — including all of this course's code.</dd>
+        <dt>Platform loader</dt><dd>The loader for JDK modules outside <code>java.base</code>, such as <code>java.sql</code>. Named <code>"platform"</code>.</dd>
+        <dt>Application (system) loader</dt><dd>The loader for your own classes and libraries on the class path. Named <code>"app"</code>.</dd>
+        <dt>Parent</dt><dd>The loader another loader asks first.</dd>
+        <dt>Parent delegation</dt><dd>The rule that a loader asks its parent before searching itself.</dd>
+        <dt>Override</dt><dd>Replace a method from a parent class with your own version.</dd>
+        <dt>Framework</dt><dd>A large ready-made code base your code plugs into, such as Spring.</dd>
+        <dt>Defining loader</dt><dd>The loader that actually turned the bytes into the class.</dd>
+        <dt>Runtime identity</dt><dd>A class's full name plus its defining loader. Two loaders, one name = two different types.</dd>
+        <dt>Cast</dt><dd>Writing <code>(Config) obj</code> to tell Java to treat an object as a given type.</dd>
+        <dt><code>ClassCastException</code></dt><dd>The error when a cast is impossible. &ldquo;X cannot be cast to X&rdquo; means two loaders each defined X.</dd>
+        <dt>Linking</dt><dd>The middle step of a class's life: verification, preparation and resolution.</dd>
+        <dt>Verification</dt><dd>The JVM checking a class's bytecode is safe before running any of it.</dd>
+        <dt>Memory-safe</dt><dd>Unable to accidentally read or write memory the program does not own.</dd>
+        <dt>Deprecated</dt><dd>Officially marked &ldquo;do not use; may be removed later&rdquo;.</dd>
+        <dt>Preparation</dt><dd>Making room for static fields and setting them to 0, <code>false</code> or <code>null</code>.</dd>
+        <dt><code>ConstantValue</code> attribute</dt><dd>The place in a class file where a compile-time constant's value is stored.</dd>
+        <dt>Resolution</dt><dd>Turning the constant pool's names into direct pointers. HotSpot does it late, on first use.</dd>
+        <dt>Pointer</dt><dd>A memory address that says exactly where something is.</dd>
+        <dt>Initialization</dt><dd>Running a class's static assignments and <code>static { }</code> blocks, exactly once.</dd>
+        <dt><code>&lt;clinit&gt;</code></dt><dd>The hidden method <code>javac</code> builds from all your static setup code, in source order.</dd>
+        <dt>Thread-safe</dt><dd>Works correctly even when several threads use it at the same time.</dd>
+        <dt>Lock</dt><dd>Code that makes threads take turns, so only one does something at a time.</dd>
+        <dt><code>ExceptionInInitializerError</code></dt><dd>Thrown the first time a static initializer fails. Its cause holds the real error.</dd>
+        <dt>&ldquo;Could not initialize class X&rdquo;</dt><dd>X is present but broken, because its initializer failed earlier. Look for the first error.</dd>
+        <dt>Driver (database)</dt><dd>A library class that knows how to talk to one kind of database.</dd>
+        <dt>Erasure</dt><dd>The compiler removing type arguments like <code>&lt;Config&gt;</code> after checking them.</dd>
+        <dt>Compile-time constant</dt><dd>A <code>static final</code> primitive or <code>String</code> set to a fixed value. Its value is copied into every reader.</dd>
+        <dt>Inlining (a constant)</dt><dd>The compiler copying a constant's value into the code that reads it.</dd>
+        <dt>Public API</dt><dd>The classes, methods and fields a library offers for other code to use.</dd>
+        <dt>Flag</dt><dd>An option added to a command, starting with <code>-</code>, such as <code>-verbose:class</code>.</dd>
+        <dt><code>-verbose:class</code> / <code>-Xlog:class+load=info</code></dt><dd>Flags that make the JVM print one line per class as it loads.</dd>
+        <dt><code>jrt:</code></dt><dd>The address style for the JDK's own module storage, e.g. <code>jrt:/java.sql</code>.</dd>
+        <dt>Class-data sharing</dt><dd>A ready-made archive of core classes the JVM loads at startup to save time.</dd>
+        <dt>Exception / Error</dt><dd>Both signal problems. An Exception may be handled; an Error usually cannot be recovered from.</dd>
+        <dt>Checked exception</dt><dd>An exception the compiler forces you to catch or declare.</dd>
+        <dt>Stack trace</dt><dd>The list of method calls printed with an error, showing where it happened.</dd>
+        <dt>Log</dt><dd>The running record of messages a program prints while it works.</dd>
+        <dt><code>ClassNotFoundException</code></dt><dd>A lookup <em>by name as text</em> found the class nowhere in the chain.</dd>
+        <dt><code>NoClassDefFoundError</code></dt><dd>A class your compiled code refers to is missing at run time. A packaging problem.</dd>
+        <dt><code>Class.forName(name)</code></dt><dd>Finds a class by name and initializes it. The three-argument form can skip initializing.</dd>
+        <dt>Idiom</dt><dd>A common, well-known code pattern.</dd>
+        <dt>Singleton</dt><dd>A class that has exactly one object.</dd>
+        <dt>Holder idiom</dt><dd>A lazy, thread-safe singleton built from the class-initialization rules.</dd>
+        <dt>Application server</dt><dd>A program, such as Tomcat, that runs other Java programs inside it.</dd>
+        <dt>Thread context class loader</dt><dd>A loader each thread carries, so framework code can reach classes below it.</dd>
+        <dt><code>ServiceLoader</code></dt><dd>A JDK class that finds implementations of an interface on the class path.</dd>
+        <dt>Hot-reloading</dt><dd>Changing code while a program runs, done by replacing a whole class loader.</dd>
+        <dt>Memory leak</dt><dd>Memory that stays used and never comes back, because something still refers to it.</dd>
+        <dt>Reflection</dt><dd>Code that finds and uses classes and methods by name while the program runs.</dd>
+        <dt>Class loader leak</dt><dd>One leftover reference keeping a whole loader, and all its classes, alive.</dd>
+        <dt>Lazy loading</dt><dd>Loading a class only when it is first used, not at startup.</dd>
+      </dl>
+    </section>
+
+    <!-- ===================== SECTION 10 — QUICK RECAP ===================== -->
     <section id="s10">
+      <h2><span class="sec-num">10</span> Quick recap</h2>
+      <ul class="recap">
+        <li>A class loader is an ordinary Java object that turns a class name into a loaded class. Every JVM has three in a chain: bootstrap (shows up as <code>null</code>), platform, and application.</li>
+        <li>Parent delegation means a loader asks its parent before searching itself. So a fake <code>java.lang.String</code> can never be reached, and every JDK class exists exactly once.</li>
+        <li>A class is known by its name <em>plus</em> its defining loader. Two loaders defining the same name make two different types — the cause of &ldquo;Config cannot be cast to Config&rdquo;.</li>
+        <li>Every class goes through loading, linking (verification, preparation, resolution) and initialization. Only initialization runs your code, in <code>&lt;clinit&gt;</code>: once per loader, locked by the JVM, broken forever if it throws.</li>
+        <li>A class initializes on <code>new</code>, a static method call, a non-constant static field, or <code>Class.forName</code> — not on an import, <code>Foo.class</code>, an array, or a compile-time constant. Constants are copied into callers, so changing one needs a full rebuild.</li>
+      </ul>
+    </section>
+
+    <!-- ===================== WHAT IS NEXT ===================== -->
+    <section id="next">
       <div class="nextup">
         <p class="kicker">What is next</p>
         <h2><a href="../../phase-2-memory-and-gc/chapter-02-memory-and-objects/lesson-03-runtime-memory-areas.html">Lesson 03 — Runtime Memory Areas</a></h2>
