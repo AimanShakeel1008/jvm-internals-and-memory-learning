@@ -235,3 +235,91 @@ Every term this course introduces, in plain language, with the lesson where it f
 | `-XX:+HeapDumpOnOutOfMemoryError` | Writes a heap dump at the moment an `OutOfMemoryError` occurs (to `-XX:HeapDumpPath`). Standard for production services. | Lesson 07 |
 | JConsole / VisualVM / Eclipse MAT | Visual tools: JConsole ships with the JDK (live graphs); VisualVM is a separate download (monitoring, heap dumps); Eclipse MAT analyses large heap dumps (dominator tree, leak suspects). | Lesson 07 |
 | JDK Flight Recorder (JFR) | An event recorder built into HotSpot, cheap enough for production, started with `jcmd <pid> JFR.start` and viewed in JDK Mission Control. | Lesson 07 |
+
+## Everyday computing words explained in the lessons
+
+The beginner rewrite of the lessons explains these basic words in plain language where they first appear. They are listed here so nothing a lesson explains is missing from the index.
+
+| Term | Plain-language meaning | First appears |
+| --- | --- | --- |
+| Compile | Turn the code you typed into a form a computer (or the JVM) can run. | Lesson 00 |
+| Operating system | The main program that runs a computer, such as Windows, macOS or Linux. | Lesson 00 |
+| Terminal | A window where you type commands instead of clicking. | Lesson 00 |
+| Library | Ready-made code someone wrote for others to use. | Lesson 00 |
+| Framework | Ready-made code that does the common work, so you only write your own part (JUnit, Spring). | Lesson 00 |
+| Patch release | A small update (like 21.0.2) that fixes bugs and security holes but adds no features. | Lesson 00 |
+| Major version | The first number of a version: 21 in 21.0.7. | Lesson 00 |
+| Convention | A shared habit everyone follows, like Maven's fixed folder layout. | Lesson 00 |
+| CPU core | One part of the processor that can work on one task at a time. | Lesson 00 |
+| Overflow | A number running past the largest value its type can hold and wrapping round to a wrong value. | Lesson 00 |
+| Production | The real system that real customers use. | Lesson 00 |
+| Millisecond / microsecond | One thousandth / one millionth of a second. | Lesson 01 / 04 |
+| Byte / bit | A bit is one 0 or 1; a byte is eight bits and holds a number from 0 to 255. | Lesson 01 |
+| Portable | Able to move to another machine and still work. | Lesson 01 |
+| Masking (`& 0xFF`) | Keeping only the lowest eight bits so a signed byte reads as 0 to 255. | Lesson 01 |
+| Lambda | A short unnamed function written with `->`, like `x -> x * 2`. | Lesson 01 |
+| Profiler | A tool that measures where a running program spends its time. | Lesson 01 |
+| Benchmark | A careful, repeatable speed test. | Lesson 01 |
+| Server | A long-running program that answers requests from other computers. | Lesson 01 |
+| Class path | The list of folders and jar files where the JVM looks for compiled classes. | Lesson 01 |
+| Jar file | A zip file full of `.class` files — the usual way Java code is packaged. | Lesson 01 |
+| Mock | A fake object that stands in for a real one during a test. | Lesson 01 |
+| Deploy | Install a new version of a program on the machines that run it for real. | Lesson 01 |
+| Plugin | An add-on a program loads while running, like a browser extension. | Lesson 02 |
+| Cache | A saved copy or store of results, kept so work does not have to be redone. | Lesson 02 |
+| Module | A named group of packages; the JDK is split into modules such as `java.base`. | Lesson 02 |
+| Override | Replace a parent class's method with your own version. | Lesson 02 |
+| Cast | Writing `(Config) obj` to tell Java to treat an object as a given type. | Lesson 02 |
+| Pointer | A memory address that says exactly where something is. | Lesson 02 |
+| Memory-safe | Unable to accidentally read or write memory the program does not own. | Lesson 02 |
+| Deprecated | Officially marked "do not use; may be removed later". | Lesson 02 |
+| Thread-safe | Works correctly even when several threads use it at the same time. | Lesson 02 |
+| Lock (monitor) | Something only one thread can hold at a time, so threads take turns. | Lesson 02 |
+| Public API / API | The classes, methods and fields code offers for other code to use. | Lesson 02 / 03 |
+| Flag | An option added to a command, starting with `-`, such as `-Xmx512m`. | Lesson 02 |
+| Checked exception | An exception the compiler forces you to catch or declare. | Lesson 02 |
+| Stack trace | The list of method calls printed with an error, showing where it happened. | Lesson 02 |
+| Log | The running record of messages a program prints while it works. | Lesson 02 |
+| Idiom / singleton | An idiom is a well-known code pattern; a singleton is a class with exactly one object. | Lesson 02 |
+| Application server | A program, such as Tomcat, that runs other Java programs inside it. | Lesson 02 |
+| Hot-reloading | Changing code while a program runs, done by replacing a whole class loader. | Lesson 02 |
+| Reflection | Code that finds and uses classes and methods by name while the program runs. | Lesson 02 |
+| RAM | The computer's fast working memory, emptied when the power goes off. | Lesson 03 |
+| CPU register | A tiny, super-fast storage spot inside the processor itself. | Lesson 03 |
+| Redeploy | Installing a new version of an application into a server that keeps running. | Lesson 03 |
+| Buffer / I/O | A buffer holds data on its way in or out; I/O (input/output) is moving data in and out. | Lesson 03 |
+| Recursion / base case | A method calling itself; the base case is the stopping condition. | Lesson 03 |
+| Immutable | Cannot change after it is made, like `String`. | Lesson 03 |
+| Container | A sealed box with its own memory and CPU limits that a service runs in (Docker, Kubernetes). | Lesson 03 |
+| Allocation | Asking for new memory, for example by creating an object. | Lesson 03 |
+| Thread pool / thread leak | A group of reusable worker threads; a leak is creating threads that never stop. | Lesson 03 |
+| Listener | An object that waits to be told when something happens. | Lesson 04 |
+| Iterator / boxed `Integer` | A helper that steps through a list; an `int` wrapped in an object. | Lesson 04 |
+| Object header | A small block of bookkeeping data at the start of every object; it holds the object's age. | Lesson 04 |
+| Strong reference | An ordinary reference, which keeps its object alive. | Lesson 04 |
+| `volatile` | A field modifier: every read and write really goes to memory, so all threads see the latest value. | Lesson 04 |
+| Enum | A type with a fixed list of named values. | Lesson 04 |
+| GC tuning | Adjusting collector settings so pauses are short and rare. | Lesson 04 |
+| Inner / anonymous class | A class written inside another class (an anonymous one has no name); both secretly hold the outer object. | Lesson 04 |
+| JEP | A numbered, official proposal for changing Java. | Lesson 04 |
+| Socket | One open network connection. | Lesson 04 |
+| Dashboard | A screen of live charts about a running system. | Lesson 05 |
+| Concurrent | Running at the same time as your code, on other threads, instead of stopping it. | Lesson 05 |
+| Batch job | A program that works through a big pile of data and then stops. | Lesson 05 |
+| Evacuate (G1) | Copy a region's live objects out so the whole region becomes free. | Lesson 05 |
+| `stdout` / `stderr` | A program's normal output and its error output. | Lesson 05 |
+| Log rotation | Starting a new log file when the current one is big enough, so logs never fill the disk. | Lesson 05 |
+| Live data | How much the heap holds right after a full GC — what the program really still uses. | Lesson 05 |
+| Workload / parser | A workload gives a system work to do; a parser turns text into structured data. | Lesson 05 |
+| ETL | Extract, Transform, Load: copying data from one system into another. | Lesson 05 |
+| Object pool | A store of ready-made objects handed out and returned instead of making new ones. | Lesson 06 |
+| Branch / call site | A branch is one path through an `if`; a call site is a place where a method is called. | Lesson 06 |
+| Virtual call | A call that looks up the right method in the object's class each time. | Lesson 06 |
+| Text encoding (UTF-8 / UTF-16) | The rule for turning letters into bytes; UTF-8 uses one byte for common letters, UTF-16 two. | Lesson 06 |
+| Instance / load balancer / readiness check | One running copy of a service; the system sharing requests between copies; the "ready for traffic" signal. | Lesson 06 |
+| Debugger | A tool that stops a program at a chosen line so you can inspect it. | Lesson 07 |
+| Process / diagnostic tool | A running program; a tool for finding out what is wrong with one. | Lesson 07 |
+| Access token / session cookie | Secret strings that prove a user is logged in — one reason heap dumps are sensitive. | Lesson 07 |
+| Sampling | Checking many times a second which methods are running, to see where time goes. | Lesson 07 |
+| Evict | Remove an entry from a cache or collection, usually the oldest. | Lesson 07 |
+| Storage volume | Disk space outside a container that survives when the container restarts. | Lesson 07 |
